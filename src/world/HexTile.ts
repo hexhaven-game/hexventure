@@ -31,6 +31,7 @@ export class HexTile {
   readonly edges = new THREE.Group(); // parts that depend on the neighbours (beaches)
 
   top: THREE.Mesh | null = null;
+  bed: THREE.Mesh | null = null; // water tiles: the shaped lake bed with its beaches
   decor: DecorItem[] = [];
   colliders: Collider[] = [];
   fadeables: Fadeable[] = [];

@@ -9,6 +9,7 @@ import {
   distanceToEdge,
   edgeCorners,
   hexCorners,
+  hexToWorld,
   insideHex,
   neighbor,
   type HexCoord,
@@ -92,6 +93,24 @@ function sides(dirs: number[], bands: Band[]): THREE.BufferGeometry {
   g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   g.computeVertexNormals();
   return g;
+}
+
+const SHORE_WIDTH = 4.2; // how far a beach runs into the water
+
+// distance from a point (relative to a hex centre) to that hex; 0 inside
+function hexDistance(x: number, z: number) {
+  if (insideHex(x, z)) return 0;
+  let best = Infinity;
+  const corners = hexCorners();
+  for (let i = 0; i < 6; i++) {
+    const a = corners[i];
+    const b = corners[(i + 1) % 6];
+    const abx = b.x - a.x;
+    const abz = b.z - a.z;
+    const t = Math.max(0, Math.min(1, ((x - a.x) * abx + (z - a.z) * abz) / (abx * abx + abz * abz)));
+    best = Math.min(best, Math.hypot(x - (a.x + abx * t), z - (a.z + abz * t)));
+  }
+  return best;
 }
 
 // finds free spots inside a hex for decoration
@@ -207,20 +226,51 @@ export class TileFactory {
   }
 
   private buildWaterBody(tile: HexTile) {
-    const bed = new THREE.Mesh(hexTop(WATER_BED, 6), this.terrain);
-    const col = bed.geometry.getAttribute('color');
-    const pos = bed.geometry.getAttribute('position');
-    const c = new THREE.Color();
-    for (let i = 0; i < col.count; i++) {
-      const n = fbm((pos.getX(i) + tile.center.x) * 0.2, (pos.getZ(i) + tile.center.z) * 0.2);
-      c.setHex(COLORS.wetSand).lerp(new THREE.Color(0x8fb58a), n * 0.5);
-      col.setXYZ(i, c.r, c.g, c.b);
-    }
+    // the bed gets its shape (beaches) in shapeBed, once the neighbours are known
+    const bed = new THREE.Mesh(hexTop(WATER_BED, 18), this.terrain);
     bed.receiveShadow = true;
+    tile.bed = bed;
     const surface = new THREE.Mesh(hexTop(WATER_LEVEL, 8), this.water);
     tile.ownGeometries.push(bed.geometry, surface.geometry);
     surface.renderOrder = 1;
     tile.group.add(bed, surface);
+  }
+
+  // The lake bed slopes up to land height along every shore: its height follows the distance to
+  // the nearest flat land (or the edge of the world) in world space, so neighbouring water tiles
+  // join without seams and beaches round off nicely around land corners.
+  private shapeBed(tile: HexTile) {
+    const bed = tile.bed;
+    if (!bed) return;
+    const shores: THREE.Vector3[] = [];
+    DIRECTIONS.forEach((_, d) => {
+      const c = neighbor(tile.coord, d);
+      const n = this.grid.get(c);
+      if (!n || (n.isLand && n.elevation === 0)) shores.push(hexToWorld(c));
+    });
+    const pos = bed.geometry.getAttribute('position');
+    const col = bed.geometry.getAttribute('color');
+    const sand = new THREE.Color(COLORS.sand);
+    const wet = new THREE.Color(COLORS.wetSand);
+    const deep = new THREE.Color(0x8fb58a);
+    const c = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+      const wx = pos.getX(i) + tile.center.x;
+      const wz = pos.getZ(i) + tile.center.z;
+      let dist = Infinity;
+      for (const s of shores) dist = Math.min(dist, hexDistance(wx - s.x, wz - s.z));
+      const t = Math.min(1, dist / SHORE_WIDTH);
+      const wobble = (fbm(wx * 0.35, wz * 0.35) - 0.5) * 0.25 * t * (1 - t) * 4;
+      pos.setY(i, WATER_BED * smoothstep(0, 1, t) + wobble);
+      const n = fbm(wx * 0.2, wz * 0.2);
+      if (t < 0.35) c.copy(sand).lerp(wet, smoothstep(0.12, 0.35, t));
+      else c.copy(wet).lerp(deep, smoothstep(0.35, 1, t) * (0.4 + n * 0.4));
+      col.setXYZ(i, c.r, c.g, c.b);
+    }
+    pos.needsUpdate = true;
+    col.needsUpdate = true;
+    bed.geometry.computeVertexNormals();
+    bed.geometry.computeBoundingSphere();
   }
 
   // Land colour: one grass palette in world space (so tiles join), darker forest floor that fades
@@ -270,40 +320,9 @@ export class TileFactory {
       (child as THREE.Mesh).geometry.dispose();
     }
     if (tile.type !== 'water') return;
-    const pos: number[] = [];
-    const col: number[] = [];
-    const outer = new THREE.Color(COLORS.sand);
-    const inner = new THREE.Color(COLORS.wetSand);
-    const k = (HEX_RADIUS - 2.6) / HEX_RADIUS;
-    const voidDirs: number[] = [];
-    DIRECTIONS.forEach((_, d) => {
-      const n = this.grid.get(neighbor(tile.coord, d));
-      if (n?.type === 'water' || n?.type === 'hill') return;
-      if (!n) voidDirs.push(d);
-      const [c0, c1] = edgeCorners(d);
-      // the outer edge sits exactly at land height, so the sand runs on without a seam
-      const o0: V3 = [c0.x, 0.002, c0.z];
-      const o1: V3 = [c1.x, 0.002, c1.z];
-      const i0: V3 = [c0.x * k, WATER_BED + 0.15, c0.z * k];
-      const i1: V3 = [c1.x * k, WATER_BED + 0.15, c1.z * k];
-      for (const tri of [[o0, o1, i1], [o0, i1, i0]] as [V3, V3, V3][]) {
-        const before = pos.length;
-        pushTri(pos, tri[0], tri[1], tri[2], UP);
-        for (let i = before; i < pos.length; i += 3) {
-          const cc = pos[i + 1] > -0.1 ? outer : inner;
-          col.push(cc.r, cc.g, cc.b);
-        }
-      }
-    });
-    if (pos.length) {
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-      g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-      g.computeVertexNormals();
-      const beach = new THREE.Mesh(g, this.terrain);
-      beach.receiveShadow = true;
-      tile.edges.add(beach);
-    }
+    this.shapeBed(tile);
+    // where the world ends, a wall under the beach so the pond reads as part of the island
+    const voidDirs = DIRECTIONS.map((_, d) => d).filter((d) => !this.grid.get(neighbor(tile.coord, d)));
     if (voidDirs.length) {
       const wall = new THREE.Mesh(
         sides(voidDirs, [
@@ -412,7 +431,7 @@ export class TileFactory {
       case 'water': {
         const n = 3 + Math.floor(rng() * 3);
         for (let i = 0; i < n; i++) {
-          const p = s.find(1, { maxCenter: 6.5 });
+          const p = s.find(1, { maxCenter: 4 }); // stay in the deep middle, clear of the beaches
           if (!p) continue;
           const pad = lilyPad(rng);
           pad.object.position.y = WATER_LEVEL + 0.03 - y;
