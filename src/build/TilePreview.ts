@@ -36,6 +36,7 @@ export class TilePreview {
   private landingMat = createLandingMaterial();
   private tile: HexTile | null = null;
   private st: { pos: THREE.Vector3; vel: THREE.Vector3; scale: number } | null = null;
+  private spin = 0; // extra turn that eases out after rotating (R)
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -49,15 +50,30 @@ export class TilePreview {
     }
   }
 
-  // the tile in hand (built by the game for this spot, type and rotation)
-  holdTile(tile: HexTile | null) {
+  // The tile in hand (built by the game for this spot, type and rotation). Swapping it for
+  // another one (a new spot, or rotated) keeps the hover where it is; `turned` makes the new tile
+  // start at the old orientation and turn into place.
+  holdTile(tile: HexTile | null, turned = false) {
     if (tile === this.tile) return;
-    if (this.tile) this.scene.remove(this.tile.group);
+    const prev = this.tile;
+    if (prev) this.scene.remove(prev.group);
     this.tile = tile;
-    if (tile) {
-      this.scene.add(tile.group);
+    if (!tile) {
+      this.st = null;
+      this.spin = 0;
+      return;
+    }
+    this.scene.add(tile.group);
+    if (prev && this.st) {
+      tile.group.visible = prev.group.visible;
+      tile.group.position.copy(prev.group.position);
+      tile.group.scale.copy(prev.group.scale);
+      tile.group.rotation.copy(prev.group.rotation);
+      if (turned) this.spin += Math.PI / 3;
+    } else {
       tile.group.visible = false;
       this.st = null;
+      this.spin = 0;
     }
   }
 
@@ -83,6 +99,7 @@ export class TilePreview {
     const out = { pos: tile.group.position.clone(), rot: tile.group.rotation.clone(), scale: this.st.scale };
     this.tile = null;
     this.st = null;
+    this.spin = 0;
     this.landing.visible = false;
     return out;
   }
@@ -125,6 +142,7 @@ export class TilePreview {
     t.group.visible = true;
     t.group.position.copy(st.pos);
     t.group.scale.setScalar(st.scale);
-    t.group.rotation.set(clamp(st.vel.z * 0.006, -0.3, 0.3), Math.sin(time * 1.3) * 0.05, clamp(-st.vel.x * 0.006, -0.3, 0.3));
+    this.spin *= Math.exp(-dt * 12);
+    t.group.rotation.set(clamp(st.vel.z * 0.006, -0.3, 0.3), Math.sin(time * 1.3) * 0.05 + this.spin, clamp(-st.vel.x * 0.006, -0.3, 0.3));
   }
 }

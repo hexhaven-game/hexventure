@@ -9,6 +9,10 @@ All notable changes to Hexventure. The game reads this file too: the version on 
 - The stack and the choice show real little 3D tiles: a pile with the next tile on top, and a picture of every option.
 - With no tiles left there is nothing to choose and no free spots are shown.
 - Build mode uses Hexhaven's camera angle (looking down at about 43°, turned slightly).
+- Rotating a held tile (R) turns it in place instead of shrinking it and starting over.
+
+### Fixed
+- You can no longer get stuck without tiles: when there is nothing left to clear or open, resting at the campfire gives two new tiles.
 
 ## 0.2 — 25-09-2026
 

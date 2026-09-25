@@ -83,7 +83,11 @@ export class BuildController {
     const input = this.d.input;
     const card = this.card;
     const onto = card === 'bridge' || card === 'stairs';
-    if (!onto && (input.wasPressed('KeyR') || input.consumeRightClick())) this.rotation = (this.rotation + 1) % 6;
+    let turned = false;
+    if (!onto && (input.wasPressed('KeyR') || input.consumeRightClick())) {
+      this.rotation = (this.rotation + 1) % 6;
+      turned = true;
+    }
 
     const cursor = this.pick();
     const h = cursor ? worldToHex(cursor.x, cursor.z) : null;
@@ -104,7 +108,7 @@ export class BuildController {
       if (target) this.lastAt = target.coord;
       if (this.lastAt && !this.valid.has(hexKey(this.lastAt))) this.lastAt = null;
       const at = target?.coord ?? this.lastAt ?? [...this.valid.values()][0]?.coord ?? null;
-      this.d.preview.holdTile(at ? this.d.previewTile(at, card as TileType, this.rotation) : null);
+      this.d.preview.holdTile(at ? this.d.previewTile(at, card as TileType, this.rotation) : null, turned);
     } else this.d.preview.holdTile(null);
     const slot = target ? hexToWorld(target.coord) : null;
     if (slot && target) {

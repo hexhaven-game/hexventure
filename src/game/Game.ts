@@ -383,15 +383,15 @@ export class Game {
   previewTile(coord: HexCoord, type: TileType, rotation: number): HexTile {
     const id = `${hexKey(coord)}|${type}|${rotation}`;
     if (this.held?.id === id) return this.held.tile;
-    this.dropHeld();
+    this.dropHeld(true); // the preview swaps it for the new one itself, keeping its hover
     const tile = this.factory.create(coord, type, { chest: this.chestFor(coord, type), rotation });
     this.held = { id, tile };
     return tile;
   }
 
-  private dropHeld() {
+  private dropHeld(swapping = false) {
     if (!this.held) return;
-    if (this.held.tile.group.parent) this.preview.holdTile(null);
+    if (!swapping && this.held.tile.group.parent) this.preview.holdTile(null);
     this.factory.dispose(this.held.tile);
     this.held = null;
   }
@@ -668,7 +668,15 @@ export class Game {
     this.stats.restore();
     this.combat.clear();
     for (const t of this.grid.tiles.values()) if (t.ready) this.combat.spawnFor(t, false);
-    if (message) this.hud.message('You rest by the fire. The enemies have returned.', 2.6);
+    // never get stuck: out of tiles with nothing left to clear or open, the fire shows new land
+    const stuck =
+      this.deck.empty &&
+      ![...this.grid.tiles.values()].some((t) => !t.cleared && t.spawns.length) &&
+      !this.chests.some((c) => !c.opened);
+    if (stuck && this.inGame) {
+      this.deck.add(2);
+      this.hud.message('In the flames you see new land: +2 tiles', 3);
+    } else if (message) this.hud.message('You rest by the fire. The enemies have returned.', 2.6);
     this.autosave();
   }
 
