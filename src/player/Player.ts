@@ -5,7 +5,8 @@ import type { Arc, Phase } from './PlayerCombat';
 // What the combat system tells the model to show this frame.
 export interface Pose {
   moving: number; // 0..1 walking
-  roll: number; // 0..1 through a roll, or -1
+  roll: number; // 0..1 through a step, or -1
+  guard: boolean;
   drinking: boolean;
   hurt: number; // 0..1 hit-stun
   invulnerable: boolean;
@@ -15,35 +16,44 @@ export interface Pose {
   charge: number; // 0..1 charging a heavy attack, or -1
 }
 
-// sword yaw (turn around the body) at the start/end of each swing. The hero faces +z, so a
-// negative yaw is their right-hand side and a positive yaw their left.
+// Arm poses. The right arm swings from the shoulder and the sword continues the arm, so every
+// swing moves as one piece. yaw: turn around the body (negative = the hero's right, positive =
+// their left). pitch: 0 hangs down, -PI/2 points forward, -PI points up. bend: how far the blade
+// tips forward from the arm.
+interface ArmPose {
+  yaw: number;
+  pitch: number;
+  bend: number;
+}
+const IDLE: ArmPose = { yaw: -0.3, pitch: -0.5, bend: -1.05 }; // at the side, point forward
 const SWEEP: Record<Arc, [number, number]> = {
-  rl: [-1.9, 1.7], // from the right across to the left
-  lr: [1.8, -1.8], // back from the left to the right
-  wide: [-2.3, 2.6], // the finisher: a big sweep all the way round
-  overhead: [-0.15, -0.15],
+  rl: [-1.9, 1.6], // from the right across to the left
+  lr: [1.7, -1.8], // back from the left to the right
+  wide: [-2.3, 2.5], // the finisher: a big sweep all the way round
+  overhead: [-0.1, -0.1],
 };
-const IDLE = { yaw: -0.55, pitch: 0.55 }; // resting in the right hand, point forward and down
+const HIGH = -2.75; // sword raised up and back over the head (heavy attack)
 
 // Placeholder hero: capsule body, round head, little limbs, all animated procedurally. The sword is
 // always in hand; swings sweep it clearly from one side to the other.
 // The model faces +z; root.rotation.y turns it.
 export class Player {
   readonly root = new THREE.Group();
+  private pivot = new THREE.Group(); // at the waist: rolls and leans turn around here
   private body = new THREE.Group();
   private armL = new THREE.Group();
   private armR = new THREE.Group();
   private legL = new THREE.Group();
   private legR = new THREE.Group();
-  private sword = new THREE.Group(); // pivot at the shoulder line; the blade points along +z
+  private sword = new THREE.Group(); // in the right hand; the blade continues the arm (-y)
   private bladeMat: THREE.MeshStandardMaterial;
   private flask: THREE.Mesh;
   private mats: THREE.MeshStandardMaterial[] = [];
   private phase = 0;
   private time = 0;
   private hurtFlash = 0;
-  private yaw = IDLE.yaw;
-  private pitch = IDLE.pitch;
+  private deflectT = 0;
+  private arm: ArmPose = { ...IDLE };
 
   constructor() {
     const m = (color: number, roughness = 0.6) => {
@@ -99,17 +109,17 @@ export class Player {
     }
     this.body.add(this.armL, this.armR, this.legL, this.legR);
 
-    // sword: grip at the pivot, the blade reaching out along +z
+    // sword: held in the right hand, the blade continuing the arm (-y)
     this.bladeMat = new THREE.MeshStandardMaterial({ color: 0xe8eef2, roughness: 0.25, metalness: 0.1 });
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.05, 1.25), this.bladeMat);
-    blade.position.z = 1.0;
-    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.08, 0.08), m(0xf0c040, 0.35));
-    guard.position.z = 0.36;
-    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.28, 6).rotateX(Math.PI / 2), m(0x5a3a22));
-    grip.position.z = 0.2;
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.25, 0.05), this.bladeMat);
+    blade.position.y = -0.82;
+    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.08, 0.08), m(0xf0c040, 0.35));
+    guard.position.y = -0.18;
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.26, 6), m(0x5a3a22));
+    grip.position.y = 0.0;
     this.sword.add(blade, guard, grip);
-    this.sword.position.set(-0.28, 1.08, 0.08); // at the right shoulder
-    this.body.add(this.sword);
+    this.sword.position.set(0, -0.56, 0); // at the hand
+    this.armR.add(this.sword);
 
     this.flask = new THREE.Mesh(
       new THREE.CylinderGeometry(0.09, 0.12, 0.28, 8),
@@ -119,7 +129,11 @@ export class Player {
     this.flask.visible = false;
     this.armL.add(this.flask);
 
-    this.root.add(this.body);
+    // the body hangs from a pivot at the waist, so rolls turn around the middle
+    this.pivot.position.y = 0.8;
+    this.body.position.y = -0.8;
+    this.pivot.add(this.body);
+    this.root.add(this.pivot);
     this.root.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) o.castShadow = true;
     });
@@ -132,8 +146,12 @@ export class Player {
   // world positions of the blade's base and tip (for the sword trail)
   blade(base: THREE.Vector3, tip: THREE.Vector3) {
     this.sword.updateWorldMatrix(true, false);
-    base.set(0, 0, 0.45).applyMatrix4(this.sword.matrixWorld);
-    tip.set(0, 0, 1.62).applyMatrix4(this.sword.matrixWorld);
+    base.set(0, -0.35, 0).applyMatrix4(this.sword.matrixWorld);
+    tip.set(0, -1.45, 0).applyMatrix4(this.sword.matrixWorld);
+  }
+
+  deflectFlash() {
+    this.deflectT = 1;
   }
 
   hurt() {
@@ -142,81 +160,108 @@ export class Player {
 
   animate(dt: number, pose: Pose) {
     this.time += dt;
-    const moving = pose.phase ? 0 : pose.moving;
+    const moving = pose.phase || pose.charge >= 0 ? 0 : pose.moving;
     this.phase += dt * 11 * moving;
     const s = Math.sin(this.phase);
     this.legL.rotation.x = s * 0.75 * moving;
     this.legR.rotation.x = -s * 0.75 * moving;
-    this.armL.rotation.set(-s * 0.6 * moving, 0, 0);
-    this.body.position.y = Math.abs(Math.cos(this.phase)) * 0.07 * moving;
-    this.body.rotation.set(0, 0, 0);
+    this.armL.rotation.set(-s * 0.6 * moving - 0.15, 0, 0);
+    this.body.position.y = -0.8 + Math.abs(Math.cos(this.phase)) * 0.07 * moving;
     this.body.scale.set(1, 1 + Math.sin(this.time * 2.2) * 0.012 * (1 - moving), 1);
 
-    // ---- sword and right arm
-    let yaw = IDLE.yaw + Math.sin(this.phase) * 0.1 * moving;
-    let pitch = IDLE.pitch;
+    // ---- the sword arm
+    const want: ArmPose = { yaw: IDLE.yaw, pitch: IDLE.pitch - s * 0.15 * moving, bend: IDLE.bend };
+    let follow = 14; // how quickly the arm follows its pose (very fast during a hit)
     let twist = 0;
     let lean = 0;
-    let follow = 12; // how quickly the sword follows (fast during the hit itself)
-    if (pose.charge >= 0) {
-      // heavy attack held: sword raised high behind the head, trembling when full
-      yaw = -0.2;
-      pitch = -2.35 + (pose.charge >= 1 ? Math.sin(this.time * 60) * 0.03 : 0);
-      lean = -0.12;
+    let crouch = 0;
+    if (pose.guard) {
+      // guard: the sword held across the front, body turned a little behind it
+      want.yaw = 1.05; // the arm across the chest, the blade level in front
+      want.pitch = -1.55;
+      want.bend = 0;
+      twist = 0.3;
+      crouch = 0.08;
+      follow = 28;
+    } else if (pose.charge >= 0) {
+      // heavy attack held: raised high, body coiled back; trembling when fully charged
+      want.yaw = -0.1;
+      want.pitch = HIGH + (pose.charge >= 1 ? Math.sin(this.time * 55) * 0.04 : 0);
+      want.bend = -0.25;
+      lean = -0.12 - pose.charge * 0.06;
+      crouch = pose.charge * 0.08;
+      follow = 10;
     } else if (pose.arc && pose.phase) {
-      const [from, to] = SWEEP[pose.arc];
       const p = pose.p;
+      const e = easeOutCubic(p);
       if (pose.arc === 'overhead') {
-        if (pose.phase === 'windup') pitch = -2.35;
+        want.yaw = -0.1;
+        want.bend = -0.25;
+        if (pose.phase === 'windup') want.pitch = HIGH;
         else if (pose.phase === 'active') {
-          pitch = -2.35 + easeOutCubic(p) * 3.2;
-          follow = 60;
-        } else pitch = 0.85 + (IDLE.pitch - 0.85) * easeOutCubic(p);
-        yaw = -0.15;
-        lean = pose.phase === 'active' ? 0.25 : pose.phase === 'recover' ? 0.25 * (1 - p) : -0.1;
-      } else {
-        // wind up to one side, sweep fast across, follow through and settle
-        if (pose.phase === 'windup') {
-          yaw = from * easeOutCubic(p) + IDLE.yaw * (1 - easeOutCubic(p));
-          pitch = 0.1;
-        } else if (pose.phase === 'active') {
-          yaw = from + (to - from) * easeOutCubic(p);
-          pitch = 0.12;
-          follow = 60;
+          want.pitch = HIGH + e * 2.1; // down in front
+          follow = 70;
+          lean = 0.3 * e;
+          crouch = 0.12 * e;
         } else {
-          const k = easeOutCubic(p);
-          yaw = to + (IDLE.yaw - to) * k;
-          pitch = 0.12 + (IDLE.pitch - 0.12) * k;
+          want.pitch = HIGH + 2.1 + (IDLE.pitch - HIGH - 2.1) * e;
+          want.bend = -0.25 + (IDLE.bend + 0.25) * e;
+          lean = 0.3 * (1 - e);
+          crouch = 0.12 * (1 - e);
         }
-        twist = -yaw * 0.28; // the body turns with the swing
-        lean = pose.arc === 'wide' && pose.phase === 'active' ? 0.12 : 0;
+      } else {
+        // wind up to one side, sweep fast across at chest height, follow through, settle
+        const [from, to] = SWEEP[pose.arc];
+        want.bend = -0.2;
+        if (pose.phase === 'windup') {
+          want.yaw = IDLE.yaw + (from - IDLE.yaw) * e;
+          want.pitch = IDLE.pitch + (-1.3 - IDLE.pitch) * e;
+        } else if (pose.phase === 'active') {
+          want.yaw = from + (to - from) * e;
+          want.pitch = -1.4;
+          follow = 70;
+        } else {
+          want.yaw = to + (IDLE.yaw - to) * e;
+          want.pitch = -1.4 + (IDLE.pitch + 1.4) * e;
+          want.bend = -0.2 + (IDLE.bend + 0.2) * e;
+        }
+        twist = want.yaw * 0.3; // the body turns with the swing
+        lean = pose.phase === 'active' ? 0.1 : 0;
       }
     }
-    this.yaw += (yaw - this.yaw) * Math.min(1, dt * follow);
-    this.pitch += (pitch - this.pitch) * Math.min(1, dt * follow);
-    this.sword.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
-    this.body.rotation.y = twist;
-    this.body.rotation.x = lean;
-    // the right arm reaches along the sword
-    this.armR.rotation.set(-1.1 + this.pitch * 0.55, 0, -0.1 - this.yaw * 0.2, 'YXZ');
-    this.armR.rotation.y = this.yaw * 0.6;
-    const glow = pose.charge >= 0 ? 0.25 + pose.charge * 0.6 : 0;
-    this.bladeMat.emissive.setRGB(glow, glow * 0.8, glow * 0.4);
+    const k = Math.min(1, dt * follow);
+    this.arm.yaw += (want.yaw - this.arm.yaw) * k;
+    this.arm.pitch += (want.pitch - this.arm.pitch) * k;
+    this.arm.bend += (want.bend - this.arm.bend) * k;
+    this.armR.rotation.set(this.arm.pitch, this.arm.yaw, 0, 'YXZ');
+    this.sword.rotation.set(this.arm.bend, 0, 0);
+    this.body.rotation.set(0, twist, 0);
+    this.pivot.rotation.set(lean, 0, 0);
+    this.pivot.position.y = 0.8 - crouch;
+    this.deflectT = Math.max(0, this.deflectT - dt * 4);
+    const glow = pose.charge >= 0 ? 0.2 + pose.charge * 0.7 : this.deflectT * 1.2;
+    this.bladeMat.emissive.setRGB(glow, glow * 0.75, glow * 0.35);
 
-    // ---- roll: tuck in and tumble forward
+    // ---- step: a low, quick dash; leaning into it, legs apart
     if (pose.roll >= 0) {
-      this.body.rotation.x = pose.roll * Math.PI * 2;
-      this.body.position.y = 0.25 + Math.sin(pose.roll * Math.PI) * 0.33;
-      this.body.scale.setScalar(0.85);
+      const r = Math.sin(Math.min(1, pose.roll) * Math.PI);
+      this.pivot.rotation.x = 0.35 * r;
+      this.pivot.position.y = 0.8 - 0.14 * r;
+      this.legL.rotation.x = 0.7 * r;
+      this.legR.rotation.x = -0.9 * r;
+      this.armL.rotation.x = 0.5 * r;
     }
+    // ---- guard: the left hand comes up to brace the blade
+    if (pose.guard) this.armL.rotation.set(-1.45, -0.7, 0, 'YXZ');
     // ---- flask in the left hand
     this.flask.visible = pose.drinking;
     if (pose.drinking) this.armL.rotation.set(-2.1, 0, -0.5);
     // ---- hit: thrown back a little
-    if (pose.hurt > 0) this.body.rotation.x = -0.35 * pose.hurt;
+    if (pose.hurt > 0) this.pivot.rotation.x = -0.35 * pose.hurt;
 
     this.hurtFlash = Math.max(0, this.hurtFlash - dt * 5);
     for (const mm of this.mats) mm.emissive.setRGB(this.hurtFlash * 0.9, 0, 0);
     this.body.visible = !pose.invulnerable || pose.hurt > 0 || Math.floor(this.time * 14) % 2 === 0;
   }
 }
+

@@ -66,8 +66,9 @@ Splitting (breaks into slimes). Elites have a coloured ring, a health bar and dr
 | WASD / arrows | move | 1–3 or click | choose one of three tiles |
 | mouse | aim (the hero faces the cursor) | mouse | the tile follows the cursor and hovers over a free spot |
 | click / Space | attack: a three-hit combo, in rhythm | R / right-click | rotate the tile 60° |
-| hold right mouse / R | charged heavy attack | click | drop it |
-| Shift | dodge roll (cancels an attack's recovery) | WASD, wheel | pan, zoom |
+| hold R | charged heavy attack | click | drop it |
+| right mouse | guard; press as a hit lands to deflect | WASD, wheel | pan, zoom |
+| Shift | step (a quick dodge; cancels an attack's recovery) | | |
 | F | lock on | Tab | back to play |
 | Q | drink from the flask | | |
 | E | rest, use a shrine, open a chest | | |
@@ -79,7 +80,12 @@ Every attack has a wind-up, a short active moment (the only time it hits) and a 
 are committed to. Light attacks chain into a combo from the second half of the recovery, and
 only one press is remembered, so rhythm matters, not mashing. Hits cause a brief hit-stop and
 camera shake. Enemies have poise: wear it down and they are broken for a moment, and the next
-hit is a critical. A white glint warns you just before an enemy attacks; roll through it.
+hit is a critical. A white glint warns you just before an enemy attacks.
+
+Defence works like Sekiro: hold right mouse to guard (blocks cost stamina, your posture; at zero
+the guard breaks). Press it just as a hit lands to **deflect**: no damage, and a big hit to the
+attacker's poise, so deflecting well is the fastest way to break an enemy. Attacks marked with a
+red ring on the ground can't be blocked; step out of them.
 
 ## Title screen, saves and the debug world
 

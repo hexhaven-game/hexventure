@@ -13,7 +13,8 @@ const ELITE_COLOR: Record<Elite, number> = { swift: 0x5ad0ff, armored: 0xffc040,
 export interface EnemyCtx {
   player: THREE.Vector3; // feet
   collision: WorldCollision;
-  hurtPlayer: (from: THREE.Vector3, damage: number, knock: number, source?: Enemy) => void;
+  // unblockable: the big telegraphed attacks (red ring) can't be guarded or deflected
+  hurtPlayer: (from: THREE.Vector3, damage: number, knock: number, source?: Enemy, unblockable?: boolean) => void;
   shoot: (from: THREE.Vector3, target: THREE.Vector3, kind?: 'thorn' | 'rock' | 'orb') => void;
   // a ring on the ground that warns where a big attack lands
   telegraph: (at: THREE.Vector3, radius: number, time: number) => void;
@@ -131,6 +132,21 @@ export abstract class Enemy {
   // bosses set poiseMax; everyone else breaks according to their weight
   get poiseLimit() {
     return this.poiseMax || Math.min(8, Math.max(1.5, this.weight * 1.5));
+  }
+
+  // its attack was deflected: its poise takes the hit, and lighter enemies recoil
+  deflected(from: THREE.Vector3, poiseDamage: number): boolean {
+    if (this.dead) return false;
+    this.poise += poiseDamage;
+    this.poiseRest = 2.5;
+    this.knock.set(this.root.position.x - from.x, 0, this.root.position.z - from.z).normalize().multiplyScalar(7 / this.weight);
+    if (this.poise >= this.poiseLimit) {
+      this.poise = 0;
+      this.setState('broken');
+      return true;
+    }
+    if (!this.poiseArmor) this.setState('stagger');
+    return false;
   }
 
   get broken() {

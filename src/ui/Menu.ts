@@ -54,7 +54,7 @@ const CLOSE =
 const CONTROLS = `
   <div class="controls">
     <div><h3>Play</h3>
-      <p><kbd>WASD</kbd> move · <kbd>Mouse</kbd> aim</p><p><kbd>Click</kbd> / <kbd>Space</kbd> attack (three-hit combo, in rhythm)</p><p><kbd>Hold right mouse</kbd> / <kbd>R</kbd> charged heavy attack</p><p><kbd>Shift</kbd> dodge roll (cancels recovery)</p><p><kbd>F</kbd> lock on</p><p><kbd>Q</kbd> flask · <kbd>E</kbd> rest, shrine, chest</p><p><kbd>Tab</kbd> build · <kbd>Esc</kbd> pause</p></div>
+      <p><kbd>WASD</kbd> move · <kbd>Mouse</kbd> aim</p><p><kbd>Click</kbd> / <kbd>Space</kbd> attack (three-hit combo, in rhythm)</p><p><kbd>Hold R</kbd> charged heavy attack</p><p><kbd>Right mouse</kbd> guard; press it just as a hit lands to deflect</p><p><kbd>Shift</kbd> step (a quick dodge)</p><p><kbd>F</kbd> lock on</p><p><kbd>Q</kbd> flask · <kbd>E</kbd> rest, shrine, chest</p><p><kbd>Tab</kbd> build · <kbd>Esc</kbd> pause</p></div>
     <div><h3>Build</h3>
       <p><kbd>1</kbd>–<kbd>3</kbd> pick a tile from your hand</p><p><kbd>Click</kbd> place</p><p><kbd>R</kbd> / right-click rotate</p><p><kbd>WASD</kbd> pan · <kbd>Wheel</kbd> zoom</p><p><kbd>Tab</kbd> back to play</p></div>
   </div>

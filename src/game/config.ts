@@ -40,8 +40,17 @@ export const PLACE_ANIM = 0.6; // seconds a new tile takes to rise into place
 export const CHEST_CHANCE = 0.4; // forest tiles after the first
 
 // ---------- soulslike ----------
-export const STAMINA = { max: 100, regen: 60, delay: 0.5, attack: 22, roll: 28, perLevel: 20 };
-export const ROLL = { time: 0.42, speed: 12.5, iFrom: 0.03, iTo: 0.32 };
+export const STAMINA = { max: 100, regen: 60, delay: 0.5, attack: 22, roll: 20, perLevel: 20 };
+// the step (Shift): a quick dash with a brief moment of invulnerability
+export const ROLL = { time: 0.22, speed: 17, iFrom: 0.0, iTo: 0.16 };
+// guard and deflect (right mouse, Sekiro-style)
+export const GUARD = {
+  deflectWindow: 0.18, // seconds after pressing guard in which a hit is deflected
+  spamLock: 0.4, // pressing again sooner than this gives no deflect window
+  blockCost: 22, // stamina (posture) a blocked hit costs
+  deflectPosture: 2.5, // poise damage a deflect does to the attacker
+  breakStun: 0.9, // guard broken: stunned this long
+};
 export const FLASK = { charges: 3, drink: 0.8, healAt: 0.5 };
 
 // ---------- the run ----------

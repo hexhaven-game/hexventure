@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { FLASK, PLAYER, ROLL } from '../game/config';
+import { FLASK, GUARD, PLAYER, ROLL } from '../game/config';
 import type { InputManager } from '../input/InputManager';
 import { damp, dampAngle, dampFactor } from '../utils/math';
 import type { WorldCollision } from '../world/Collision';
@@ -7,8 +7,8 @@ import type { Player } from './Player';
 import type { PlayerCombat } from './PlayerCombat';
 import type { PlayerStats } from './PlayerStats';
 
-// Movement: WASD relative to the camera, a dodge roll (Shift) with invulnerability frames, the
-// flask (Q), knockback and a short hit-stun. While attacking you are committed: the attack moves
+// Movement: WASD relative to the camera, a quick step (Shift) with a moment of invulnerability,
+// guarding and deflecting (right mouse, Sekiro-style), the flask (Q), knockback and hit-stun. While attacking you are committed: the attack moves
 // you (a step into the swing), not the keys. The hero faces the aim point (mouse, lock-on target).
 export class PlayerController {
   readonly velocity = new THREE.Vector3();
@@ -17,6 +17,9 @@ export class PlayerController {
   rollId = 0; // counts rolls (a flame trail burns each enemy once per roll)
   drinkT = -1;
   stun = 0; // seconds of hit-stun left
+  guarding = false;
+  private sincePress = 99; // seconds since guard was last pressed
+  private deflectOpen = false; // this press still has a deflect window
   private rollDir = new THREE.Vector3();
   private healed = false;
   private knock = new THREE.Vector3();
@@ -45,6 +48,16 @@ export class PlayerController {
 
   get iframes() {
     return this.rollT >= ROLL.iFrom && this.rollT <= ROLL.iTo;
+  }
+
+  // a hit landing now would be deflected
+  get deflecting() {
+    return this.guarding && this.deflectOpen && this.sincePress <= GUARD.deflectWindow;
+  }
+
+  // the deflect happened: no further deflects from this press
+  useDeflect() {
+    this.deflectOpen = false;
   }
 
   teleport(p: THREE.Vector3) {
@@ -89,7 +102,16 @@ export class PlayerController {
     if (this.wish.lengthSq() > 0) this.wish.normalize();
     const root = this.player.root;
 
-    // dodge roll: in the direction you hold, or backwards from the aim; cancels an attack's recovery
+    // guard (hold right mouse); a fresh press opens a short deflect window, unless you mash
+    this.sincePress += dt;
+    const guardHeld = free && i.isDown('Mouse2') && !this.rolling && !this.drinking && !combat.attack && combat.charge < 0;
+    if (free && i.wasPressed('Mouse2')) {
+      this.deflectOpen = this.sincePress > GUARD.spamLock;
+      this.sincePress = 0;
+    }
+    this.guarding = guardHeld;
+
+    // step: in the direction you hold, or back from where you face; cancels an attack's recovery
     if (free && (i.wasPressed('ShiftLeft') || i.wasPressed('ShiftRight')) && !this.rolling && !this.drinking && combat.canRoll) {
       if (this.stats.spend(this.stats.rollCost)) {
         combat.cancel();
@@ -97,7 +119,6 @@ export class PlayerController {
         this.rollId++;
         if (this.wish.lengthSq() > 0) this.rollDir.copy(this.wish);
         else this.rollDir.set(-Math.sin(root.rotation.y), 0, -Math.cos(root.rotation.y)); // a backstep
-        root.rotation.y = Math.atan2(this.rollDir.x, this.rollDir.z);
       }
     }
     // flask: heals one heart, slows you down while drinking
@@ -111,7 +132,7 @@ export class PlayerController {
     if (this.rolling) {
       this.rollT += dt;
       const k = this.rollT / ROLL.time;
-      this.velocity.copy(this.rollDir).multiplyScalar(ROLL.speed * (1 - k * 0.6));
+      this.velocity.copy(this.rollDir).multiplyScalar(ROLL.speed * (1 - k * k * 0.85));
       if (this.rollT >= ROLL.time) this.rollT = -1;
     } else if (attack) {
       // committed: a step into the swing during the hit, otherwise planted
@@ -120,7 +141,7 @@ export class PlayerController {
       const step = phase === 'active' ? attack.def.lunge * (1 - combat.phaseProgress) : phase === 'windup' ? 1 : 0;
       this.velocity.copy(f).multiplyScalar(step);
     } else {
-      const slow = combat.charge >= 0 ? 0.35 : this.drinking ? 0.3 : 1;
+      const slow = combat.charge >= 0 ? 0.35 : this.drinking ? 0.3 : this.guarding ? 0.45 : 1;
       this.velocity.lerp(this.wish.multiplyScalar(PLAYER.speed * slow * this.stats.speedMul), dampFactor(PLAYER.accel, dt));
     }
     if (this.drinking) {
@@ -140,7 +161,8 @@ export class PlayerController {
 
     // facing: the aim point when there is one (you can walk one way and look another), otherwise
     // where you walk. Attacks turn only in their wind-up.
-    const turnable = !this.rolling && (!attack || combat.phase === 'windup') && this.stun <= 0;
+    // (a step keeps you facing where you looked: you can step sideways past an attack)
+    const turnable = (!attack || combat.phase === 'windup') && this.stun <= 0;
     if (turnable) {
       const planar = Math.hypot(this.velocity.x, this.velocity.z);
       if (aim) {

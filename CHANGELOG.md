@@ -2,6 +2,17 @@
 
 All notable changes to Hexventure. The game reads this file too: the version on the title screen opens it.
 
+## 0.6 — 25-09-2026
+
+### New
+- Guard and deflect, Sekiro-style (right mouse). Holding it blocks hits from the front at the cost of stamina (your posture); when it runs out your guard breaks and you are stunned. Press it just as a hit lands to deflect: no damage, sparks, and a big hit to the attacker's poise. Pressing again too quickly gives no deflect window.
+- Unblockable attacks: the slams and leaps marked by a red ring can't be guarded or deflected. Step out of the ring.
+
+### Improved
+- The roll is replaced by a quick step (Shift): a low dash with a moment of invulnerability. No more tumbling.
+- The sword sits in the hand at the end of the arm, and the arm makes every swing, so attacks move as one piece instead of the sword floating loose.
+- The heavy attack is now on holding R (the right mouse button guards). It raises the sword high, trembles when fully charged, and brings it down in front with the body behind it.
+
 ## 0.5 — 25-09-2026
 
 ### Improved

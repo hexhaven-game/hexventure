@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PLAYER } from '../game/config';
+import { GUARD, PLAYER } from '../game/config';
 import type { Player } from '../player/Player';
 import type { PlayerCombat } from '../player/PlayerCombat';
 import type { PlayerController } from '../player/PlayerController';
@@ -39,6 +39,8 @@ interface Deps {
   onHit: (e: Enemy, r: { crit: boolean; broke: boolean; killed: boolean; heavy: boolean }) => void;
   // an enemy is about to attack
   onTell: (e: Enemy) => void;
+  // guarding: a perfect deflect, a plain block, or the guard breaking
+  onGuard: (kind: 'deflect' | 'block' | 'break', at: THREE.Vector3, broke: boolean) => void;
 }
 
 // The sword, taking hits, thorns, and all enemies.
@@ -56,14 +58,14 @@ export class CombatSystem {
     this.ctx = {
       player: deps.player.root.position,
       collision: deps.collision,
-      hurtPlayer: (from, damage, knock, source) => this.hurtPlayer(from, damage, knock, source),
+      hurtPlayer: (from, damage, knock, source, unblockable) => this.hurtPlayer(from, damage, knock, source, unblockable),
       shoot: (from, target, kind) => this.projectiles.shoot(from, target, kind),
       telegraph: (at, radius, time) => deps.rings.telegraph(at, radius, time),
       slam: (at, radius, knock) => {
         deps.rings.shock(at, radius * 1.3, 0xf1dea4);
         deps.particles.burst(at.clone().setY(at.y + 0.3), [0xc9a77a, 0xf1dea4, 0x9edd62], 30, 7, 0.22, 3);
         const p = deps.player.root.position;
-        if (Math.hypot(p.x - at.x, p.z - at.z) < radius) this.hurtPlayer(at, 1, knock);
+        if (Math.hypot(p.x - at.x, p.z - at.z) < radius) this.hurtPlayer(at, 1, knock, undefined, true);
       },
       summon: (kind, at, tileKey) => {
         const y = deps.collision.groundAt(at.x, at.z);
@@ -105,15 +107,44 @@ export class CombatSystem {
     return this.enemies.some((e) => e.alive && e.tileKey === tileKey);
   }
 
-  private hurtPlayer(from: THREE.Vector3, damage: number, knock: number, source?: Enemy) {
+  private hurtPlayer(from: THREE.Vector3, damage: number, knock: number, source?: Enemy, unblockable = false) {
     const { stats, controller } = this.d;
     if (this.invulnerable > 0 || controller.iframes || stats.hearts <= 0) return false;
+    // guarding against a hit from the front: deflect it (right timing) or block it (costs posture)
+    const p = this.d.player.root.position;
+    const toward = new THREE.Vector3(from.x - p.x, 0, from.z - p.z).normalize();
+    const facing = new THREE.Vector3(Math.sin(this.d.player.facing), 0, Math.cos(this.d.player.facing));
+    if (controller.guarding && !unblockable && toward.dot(facing) > -0.2) {
+      const at = p.clone().addScaledVector(toward, 0.7).setY(p.y + 1.2);
+      if (controller.deflecting) {
+        controller.useDeflect();
+        stats.stamina = Math.min(stats.maxStamina, stats.stamina + 8);
+        const broke = source ? source.deflected(p, GUARD.deflectPosture * damage) : false;
+        if (broke && source) this.d.rings.shock(source.root.position.clone(), 1.6 + source.radius, 0xffd070);
+        this.d.onGuard('deflect', at, broke);
+        return false;
+      }
+      stats.stamina -= GUARD.blockCost * damage;
+      stats.update(0);
+      if (stats.stamina <= 0) {
+        // guard broken: stunned, open to the next hit
+        stats.stamina = 0;
+        controller.knockback(toward.clone().negate(), knock * 0.6);
+        controller.stun = GUARD.breakStun;
+        controller.guarding = false;
+        this.d.onGuard('break', at, false);
+      } else {
+        controller.knockback(toward.clone().negate(), knock * 0.35);
+        controller.stun = 0.12;
+        this.d.onGuard('block', at, false);
+      }
+      return false;
+    }
     // Thorn Mail: whoever hits you gets hurt too
     if (source && stats.has('thornmail') && source.alive) this.damage(source, 1);
     stats.hearts = Math.max(0, stats.hearts - damage);
     this.invulnerable = PLAYER.invulnerable;
     this.d.player.hurt();
-    const p = this.d.player.root.position;
     controller.knockback(new THREE.Vector3(p.x - from.x, 0, p.z - from.z), knock);
     this.d.particles.burst(p.clone().setY(p.y + 1.1), [0xff5a5a, 0xffffff], 12, 4, 0.12);
     this.d.onHurt();
@@ -142,7 +173,7 @@ export class CombatSystem {
     const pos = player.root.position;
     this.invulnerable = Math.max(0, this.invulnerable - dt);
 
-    // Flame Trail: rolling through enemies burns them (once per enemy per roll)
+    // Flame Trail: stepping through enemies burns them (once per enemy per step)
     if (this.d.controller.rolling && stats.has('flametrail')) {
       const id = this.d.controller.rollId;
       for (const e of this.enemies) {
@@ -202,7 +233,8 @@ export class CombatSystem {
     }
     this.projectiles.update(dt, pos.clone().setY(pos.y + 1), (dir) => {
       const from = pos.clone().sub(dir);
-      return this.hurtPlayer(from, 1, 7) || !this.d.controller.iframes;
+      this.hurtPlayer(from, 1, 7);
+      return !this.d.controller.iframes; // a step lets it fly past; anything else stops it
     });
   }
 }

@@ -198,6 +198,28 @@ export class Game {
         this.shake = Math.min(1, this.shake + (r.crit ? 0.5 : r.heavy ? 0.32 : 0.16) + (r.broke ? 0.2 : 0));
         if (r.broke) this.hud.message('Broken! Strike now', 1.2);
       },
+      onGuard: (kind, at, broke) => {
+        if (kind === 'deflect') {
+          // a clean deflect: bright sparks, a short freeze and a ring
+          this.hitStop = Math.max(this.hitStop, 0.09);
+          this.shake = Math.min(1, this.shake + 0.25);
+          for (let k = 0; k < 24; k++) {
+            const a = Math.random() * Math.PI * 2;
+            this.particles.spawn({ pos: at, vel: new THREE.Vector3(Math.cos(a) * 7, 2 + Math.random() * 5, Math.sin(a) * 7), color: k % 3 ? 0xffe27a : 0xffffff, size: 0.07, life: 0.35, gravity: 14 });
+          }
+          this.rings.shock(at.clone().setY(this.player.root.position.y), 1.4, 0xfff0b0);
+          this.player.deflectFlash();
+          if (broke) this.hud.message('Broken! Strike now', 1.2);
+        } else if (kind === 'block') {
+          this.shake = Math.min(1, this.shake + 0.15);
+          this.particles.burst(at, [0xffffff, 0xc8d0d8], 8, 3, 0.07, 2);
+        } else {
+          this.shake = Math.min(1, this.shake + 0.5);
+          this.hitStop = Math.max(this.hitStop, 0.06);
+          this.particles.burst(at, [0xffffff, 0xff8a6a], 16, 5, 0.1, 3);
+          this.hud.message('Guard broken', 1.1);
+        }
+      },
       onTell: (e) => {
         // the warning glint: a quick white star at the enemy's head
         const at = e.root.position.clone().setY(e.root.position.y + (e.bossName ? 3.4 : 1.6));
@@ -1000,8 +1022,8 @@ export class Game {
         if (this.lockTarget && (!this.lockTarget.alive || this.lockTarget.root.position.distanceTo(this.player.root.position) > 20)) this.lockTarget = null;
         const aim = this.aimPoint();
         const light = input.wasPressed('Space') || input.wasPressed('Mouse0');
-        const heavy = input.isDown('Mouse2', 'KeyR');
-        const ready = canAct && !this.controller.rolling && !this.controller.drinking && this.controller.stun <= 0;
+        const heavy = input.isDown('KeyR');
+        const ready = canAct && !this.controller.rolling && !this.controller.drinking && this.controller.stun <= 0 && !this.controller.guarding;
         const started = this.attacks.update(gdt, light, heavy, ready);
         if (started) {
           // attacks snap towards the aim, or gently towards the nearest enemy in front
@@ -1046,7 +1068,8 @@ export class Game {
       moving,
       roll,
       drinking: this.controller.drinking,
-      hurt: this.controller.stun / 0.3,
+      hurt: this.controller.guarding ? 0 : Math.min(1, this.controller.stun / 0.3),
+      guard: this.controller.guarding,
       invulnerable: this.combat.invulnerable > 0,
       arc: this.attacks.def?.arc ?? null,
       phase: this.attacks.phase,
