@@ -16,6 +16,7 @@ import { Lighting } from '../rendering/Lighting';
 import { Occlusion } from '../rendering/Occlusion';
 import { Particles } from '../rendering/Particles';
 import { Rings } from '../rendering/Rings';
+import { Thumbs } from '../rendering/Thumbs';
 import { DebugView } from '../ui/DebugView';
 import { HUD } from '../ui/HUD';
 import { Menu } from '../ui/Menu';
@@ -37,7 +38,7 @@ import {
 } from '../world/HexGrid';
 import type { HexTile, TileType } from '../world/HexTile';
 import { TileFactory } from '../world/TileFactory';
-import { BRIDGE_Y, CHEST_CHANCE, HEX_RADIUS, PLACE_ANIM, RUN, STAMINA, WATER_BED, WATER_LEVEL } from './config';
+import { BRIDGE_Y, BUILD_CAMERA, CHEST_CHANCE, HEX_RADIUS, PLACE_ANIM, PLAY_CAMERA, RUN, STAMINA, WATER_BED, WATER_LEVEL } from './config';
 import { DEBUG_WORLD } from './debugWorld';
 import { Deck, type Card } from './Deck';
 import { SaveSystem, type SaveData, type Slot, type TileSave } from './SaveSystem';
@@ -86,6 +87,7 @@ export class Game {
   private player = new Player();
   private stats = new PlayerStats();
   private deck = new Deck();
+  private thumbs: Thumbs;
   private controller: PlayerController;
   private playCam = new PlayCameraController();
   private buildCam = new BuildCameraController();
@@ -129,6 +131,7 @@ export class Game {
     this.lighting = new Lighting(this.env.scene);
     this.input = new InputManager(this.env.renderer.domElement);
     this.factory = new TileFactory(this.grid);
+    this.thumbs = new Thumbs(this.factory);
     this.collision = new WorldCollision(this.grid);
     this.particles = new Particles(this.env.scene);
     this.rings = new Rings(this.env.scene);
@@ -238,22 +241,19 @@ export class Game {
   private startNew() {
     this.clearWorld();
     this.stats.reset();
-    this.deck = Deck.fresh();
-    this.deck.canUse = (c) => this.targetsFor(c).length > 0;
     this.placeTile({ q: 0, r: 0 }, 'home', 0, { delay: 0.2 });
     this.home = this.grid.get({ q: 0, r: 0 })!;
+    this.deck = Deck.fresh((c) => this.targetsFor(c).length > 0);
     this.beginGame(this.home.playerSpawn!, 0);
-    this.hud.message('Press Tab to build with the tiles in your hand', 3.2);
+    this.hud.message('Press Tab to build: choose 1 of 3 tiles each time', 3.2);
   }
 
   private startDebug() {
     this.clearWorld();
     this.stats.reset();
     this.stats.embers = 300; // enough to try the shrine
-    this.deck = Deck.fresh();
-    this.deck.canUse = (c) => this.targetsFor(c).length > 0;
     this.buildWorld(DEBUG_WORLD, false);
-    this.deck.fillHand();
+    this.deck = Deck.fresh((c) => this.targetsFor(c).length > 0);
     this.beginGame(this.home!.playerSpawn!, 0);
     this.hud.message('Debug world · 300 embers to spend at the shrine', 2.4);
   }
@@ -271,8 +271,10 @@ export class Game {
     this.deck = new Deck();
     this.deck.canUse = (c) => this.targetsFor(c).length > 0;
     this.buildWorld(d.tiles, false);
-    this.deck.stack = [...d.deck.stack];
-    this.deck.hand = [...d.deck.hand];
+    this.deck.count = d.deck.count;
+    this.deck.offer = [...d.deck.offer];
+    this.deck.boss = !!d.deck.boss;
+    this.deck.recheck();
     this.forests = d.forests;
     this.fragments = d.fragments;
     this.won = !!d.won;
@@ -296,7 +298,7 @@ export class Game {
   private serialize(): SaveData {
     const p = this.player.root.position;
     return {
-      v: 2,
+      v: 3,
       savedAt: Date.now(),
       tiles: [...this.grid.tiles.values()].map((t) => ({
         q: t.coord.q,
@@ -311,7 +313,7 @@ export class Game {
       })),
       player: { x: p.x, z: p.z, yaw: this.player.root.rotation.y },
       stats: { level: { ...this.stats.level }, hearts: this.stats.hearts, flasks: this.stats.flasks, embers: this.stats.embers },
-      deck: { stack: [...this.deck.stack], hand: [...this.deck.hand] },
+      deck: { count: this.deck.count, offer: [...this.deck.offer], boss: this.deck.boss },
       pile: this.pile ? { x: this.pile.object.position.x, z: this.pile.object.position.z, embers: this.pile.embers } : null,
       forests: this.forests,
       fragments: this.fragments,
@@ -394,10 +396,23 @@ export class Game {
     this.held = null;
   }
 
+  // keep a sensible choice selected: the same slot if possible, else the first usable option
+  private pickCard() {
+    const offer = this.deck.offer;
+    if (this.deck.empty || !offer.length) {
+      this.build.select(null);
+      return;
+    }
+    if (!(this.handIndex < offer.length && this.deck.canUse(offer[this.handIndex]))) {
+      this.handIndex = Math.max(0, offer.findIndex((c) => this.deck.canUse(c)));
+    }
+    this.build.select(offer[this.handIndex] ?? null);
+  }
+
   private selectCard(i: number) {
-    if (i < 0 || i >= this.deck.hand.length) return;
+    if (i < 0 || i >= this.deck.offer.length || !this.deck.canUse(this.deck.offer[i])) return;
     this.handIndex = i;
-    this.build.select(this.deck.hand[i]);
+    this.build.select(this.deck.offer[i]);
   }
 
   private playCard(coord: HexCoord, card: Card, rotation: number, dir: number | null) {
@@ -409,10 +424,8 @@ export class Game {
       this.placeTile(coord, card, rotation, { from });
     }
     this.placed++;
-    this.deck.use(this.handIndex);
-    this.deck.recheck();
-    this.handIndex = Math.min(this.handIndex, Math.max(0, this.deck.hand.length - 1));
-    this.build.select(this.deck.hand[this.handIndex] ?? null);
+    this.deck.take(this.handIndex);
+    this.pickCard();
     if (this.deck.empty) this.hud.message('No tiles left: clear areas and open chests to find more', 3.2);
     this.autosave();
   }
@@ -554,7 +567,7 @@ export class Game {
         bakeDecor(r.tile);
         if (this.inGame) this.combat.spawnFor(r.tile);
         this.deck.recheck();
-        if (this.mode === 'build') this.build.refresh();
+        if (this.mode === 'build') this.pickCard();
         return false;
       }
       return true;
@@ -603,9 +616,11 @@ export class Game {
       tile.spawns = [];
       this.fragments++;
       this.hud.banner('World Fragment obtained');
-      if (this.fragments >= RUN.fragmentsToWin && !this.deck.hand.includes('boss') && !this.won) {
-        this.deck.hand.push('boss');
-        this.hud.message('The Hollow King stirs. A Boss tile is in your hand: place it far from home.', 4.5);
+      if (this.fragments >= RUN.fragmentsToWin && !this.deck.boss && !this.won) {
+        this.deck.boss = true;
+        if (this.deck.count <= 0) this.deck.count = 1;
+        this.deck.deal();
+        this.hud.message('The Hollow King stirs. The Boss tile is one of your choices: place it far from home.', 4.5);
       } else this.hud.message(`${this.fragments} of ${RUN.fragmentsToWin} fragments`, 2.6);
     } else if (e.bossName && tile.type === 'boss') {
       tile.cleared = true;
@@ -680,8 +695,7 @@ export class Game {
   private enterBuild() {
     this.mode = 'build';
     this.buildCam.enter(this.player.root.position);
-    this.handIndex = Math.min(this.handIndex, Math.max(0, this.deck.hand.length - 1));
-    this.build.select(this.deck.hand[this.handIndex] ?? null);
+    this.pickCard();
     this.build.enter();
     this.lighting.setExtent(110);
     this.transition = 1.2;
@@ -709,13 +723,14 @@ export class Game {
   }
 
   private buildNote() {
-    const card = this.deck.hand[this.handIndex];
-    if (!card) return 'No tiles in hand. Clear areas and open chests to find more.';
+    const card = this.deck.offer[this.handIndex];
+    if (this.deck.empty || !card) return 'No tiles left. Clear areas and open chests to find more.';
     if (this.build.targetCount === 0) {
       if (card === 'lair') return 'A lair must go at least two tiles from home.';
       if (card === 'boss') return 'The boss must go at least three tiles from home.';
       return 'Nowhere to put this one yet.';
     }
+    if (card !== 'bridge' && card !== 'stairs') return 'Choose 1 tile to place';
     if (card === 'bridge') return 'Click a highlighted water tile.';
     if (card === 'stairs') return 'Click a highlighted hill, near the side the stairs should face.';
     return '';
@@ -823,6 +838,11 @@ export class Game {
     this.camLook.lerp(this.wantLook, dampFactor(rate, dt));
     this.env.camera.position.copy(this.camPos);
     this.env.camera.lookAt(this.camLook);
+    const fov = this.mode === 'build' ? BUILD_CAMERA.fov : PLAY_CAMERA.fov;
+    if (Math.abs(this.env.camera.fov - fov) > 0.01) {
+      this.env.camera.fov += (fov - this.env.camera.fov) * dampFactor(4, dt);
+      this.env.camera.updateProjectionMatrix();
+    }
 
     const chestHeight = this.player.root.position.clone().setY(this.player.root.position.y + 1);
     this.occlusion.update(this.env.camera.position, chestHeight, dt, this.mode === 'play');
@@ -832,7 +852,7 @@ export class Game {
     if (this.inGame) {
       this.hud.setVitals(this.stats);
       this.hud.setCurrency(this.stats.embers, this.fragments, RUN.fragmentsToWin);
-      this.hud.setHand(this.deck.hand, this.deck.stack.length, this.mode === 'build' ? this.handIndex : -1, (c) => this.deck.canUse(c));
+      this.hud.setDeck(this.deck.offer, this.deck.count, this.mode === 'build' ? this.handIndex : -1, this.mode === 'build', (c) => this.deck.canUse(c), this.thumbs);
       this.updateBossBar();
     }
     if (this.debug) this.showDebug();
@@ -923,7 +943,7 @@ export class Game {
         `player   ${p.x.toFixed(1)}, ${p.y.toFixed(2)}, ${p.z.toFixed(1)}`,
         `hex      ${h.q}, ${h.r}  ${t ? `${t.type} · danger ${dangerOf(t)}` : 'empty'}`,
         `camera   ${c.x.toFixed(1)}, ${c.y.toFixed(1)}, ${c.z.toFixed(1)}`,
-        `tiles    ${this.grid.tiles.size}   enemies ${this.combat.enemies.length}   stack ${this.deck.stack.length}`,
+        `tiles    ${this.grid.tiles.size}   enemies ${this.combat.enemies.length}   tiles left ${this.deck.count}`,
         `frame    ${(1000 / this.fps).toFixed(1)} ms   pixel ratio ${this.env.pixelRatio.toFixed(2)}`,
         `draws    ${this.env.renderer.info.render.calls}   tris ${(this.env.renderer.info.render.triangles / 1000).toFixed(0)}k`,
       ].join('\n'),

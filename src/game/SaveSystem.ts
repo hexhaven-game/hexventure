@@ -20,12 +20,12 @@ export interface TileSave {
 }
 
 export interface SaveData {
-  v: 2;
+  v: 3;
   savedAt: number;
   tiles: TileSave[]; // in placement order
   player: { x: number; z: number; yaw: number };
   stats: { level: Record<StatKind, number>; hearts: number; flasks: number; embers: number };
-  deck: { stack: Card[]; hand: Card[] };
+  deck: { count: number; offer: Card[]; boss?: boolean };
   pile: { x: number; z: number; embers: number } | null;
   forests: number;
   fragments: number;
@@ -38,7 +38,7 @@ export const SaveSystem = {
   read(slot: Slot): SaveData | null {
     try {
       const d = JSON.parse(localStorage.getItem(key(slot)) ?? 'null');
-      return d && d.v === 2 && Array.isArray(d.tiles) ? (d as SaveData) : null;
+      return d && d.v === 3 && Array.isArray(d.tiles) ? (d as SaveData) : null;
     } catch {
       return null;
     }

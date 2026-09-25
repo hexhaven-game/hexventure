@@ -2,6 +2,14 @@
 
 All notable changes to Hexventure. The game reads this file too: the version on the title screen opens it.
 
+## 0.3 — 25-09-2026
+
+### Improved
+- The tile stack works as in Hexhaven: the number on the stack is how many tiles you have, and each time you choose 1 of 3. Choosing no longer costs extra tiles.
+- The stack and the choice show real little 3D tiles: a pile with the next tile on top, and a picture of every option.
+- With no tiles left there is nothing to choose and no free spots are shown.
+- Build mode uses Hexhaven's camera angle (looking down at about 43°, turned slightly).
+
 ## 0.2 — 25-09-2026
 
 ### New

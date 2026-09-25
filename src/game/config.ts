@@ -25,10 +25,13 @@ export const PLAY_CAMERA = {
   follow: 9, // how quickly the camera catches up with the player
 };
 
+// the same view as Hexhaven: offset (2, 13, 14) there, so ~43° down and turned 8°, FOV 34
 export const BUILD_CAMERA = {
-  pitchDeg: 72,
-  distance: 130,
-  minDistance: 70,
+  fov: 34,
+  pitchDeg: 42.6,
+  yawDeg: 8.1,
+  distance: 150,
+  minDistance: 60,
   maxDistance: 260,
   panSpeed: 55,
 };
@@ -43,7 +46,7 @@ export const FLASK = { charges: 3, drink: 0.8, healAt: 0.5 };
 
 // ---------- the run ----------
 export const RUN = {
-  startTiles: 6, // in the stack, besides the 3 in hand
+  startTiles: 8, // tiles you start a run with (the stack)
   handSize: 3,
   fragmentsToWin: 3,
   maxHearts: 7,

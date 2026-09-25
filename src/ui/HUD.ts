@@ -1,5 +1,6 @@
-import { NEEDS_SPOT, type Card } from '../game/Deck';
+import type { Card } from '../game/Deck';
 import type { PlayerStats } from '../player/PlayerStats';
+import type { Thumbs } from '../rendering/Thumbs';
 
 const HEART =
   '<svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.6-9.1C.9 8.6 2.8 4.5 6.7 4.5c2.2 0 3.7 1.2 5.3 3 1.6-1.8 3.1-3 5.3-3 3.9 0 5.8 4.1 4.3 7.4C19.5 16.4 12 21 12 21z"/></svg>';
@@ -17,6 +18,17 @@ export const CARD_LABEL: Record<Card, string> = {
   shrine: 'Shrine',
   lair: 'Lair',
   boss: 'Boss',
+};
+const CARD_DESC: Record<Card, string> = {
+  meadow: 'Open grass',
+  forest: 'Dense trees, enemies',
+  water: 'A pond with beaches',
+  hill: 'High ground, cliffs',
+  bridge: 'Across a water tile',
+  stairs: 'Up a hill',
+  shrine: 'Upgrade here',
+  lair: 'Miniboss, fragment',
+  boss: 'The Hollow King',
 };
 const CARD_HINT: Partial<Record<Card, string>> = {
   bridge: 'Needs water with land on two opposite sides',
@@ -46,7 +58,7 @@ export class HUD {
     this.el('hints').innerHTML =
       mode === 'play'
         ? '<span><kbd>WASD</kbd> Move</span><span><kbd>Space</kbd> Attack</span><span><kbd>Shift</kbd> Roll</span><span><kbd>Q</kbd> Flask</span><span><kbd>E</kbd> Use</span><span><kbd>Tab</kbd> Build</span>'
-        : '<span><kbd>1</kbd>–<kbd>3</kbd> Pick a tile</span><span><kbd>Click</kbd> Place</span><span><kbd>R</kbd> Rotate</span><span><kbd>WASD</kbd> Pan</span><span><kbd>Tab</kbd> Play</span>';
+        : '<span><kbd>1</kbd>–<kbd>3</kbd> Choose</span><span><kbd>Click</kbd> Place</span><span><kbd>R</kbd> Rotate</span><span><kbd>WASD</kbd> Pan</span><span><kbd>Tab</kbd> Play</span>';
   }
 
   // hearts, stamina and the flask, every frame (cheap: only touches what changed)
@@ -75,21 +87,35 @@ export class HUD {
     this.el('fragments').innerHTML = `${FRAGMENT}<b>${fragments}</b><small>/${goal}</small>`;
   }
 
-  // the tile stack (count) and the hand; `usable` says which cards have a spot right now
-  setHand(hand: Card[], stack: number, selected: number, usable: (c: Card) => boolean) {
-    const sig = `${hand.join()}|${stack}|${selected}|${hand.map((c) => usable(c)).join()}`;
+  // Hexhaven-style: the stack of tiles you have left (a picture of a pile with the next tile on
+  // top, and the count), and in build mode the choice of three.
+  setDeck(offer: Card[], count: number, selected: number, building: boolean, usable: (c: Card) => boolean, thumbs: Thumbs) {
+    const top = count > 0 ? offer[selected >= 0 ? selected : 0] ?? null : null;
+    const height = count > 0 ? Math.max(1, Math.min(7, Math.ceil(count / 2))) : 1;
+    const sig = `${offer.join()}|${count}|${selected}|${building}|${offer.map((c) => usable(c)).join()}`;
     if (sig === this.handSig) return;
+    const newOffer = !this.handSig.startsWith(`${offer.join()}|${count}|`);
     this.handSig = sig;
-    this.el('stack').innerHTML = `<div class="pile">${'<i></i>'.repeat(Math.min(5, Math.max(1, stack)))}</div><b>${stack}</b><small>tiles left</small>`;
-    this.el('stack').classList.toggle('none', stack === 0);
-    this.el('hand').innerHTML = hand
-      .map((c, i) => {
-        const ok = usable(c);
-        const hint = !ok && NEEDS_SPOT.includes(c) ? CARD_HINT[c] : CARD_HINT[c] ?? '';
-        return `<button data-i="${i}" class="${i === selected ? 'on' : ''} card-${c}" ${ok ? '' : 'disabled'} title="${hint}">
-          <kbd>${i + 1}</kbd><span class="sw sw-${c}"></span><span class="nm">${CARD_LABEL[c]}</span></button>`;
-      })
-      .join('');
+    this.el('stack').innerHTML = `<img src="${thumbs.stack(top, height)}" alt=""><div class="count">${count}</div>`;
+    this.el('stack').classList.toggle('none', count === 0);
+    this.el('stack').title = count === 1 ? '1 tile left' : `${count} tiles left`;
+    const tray = this.el('tray');
+    tray.classList.toggle('show', building);
+    if (!building) return;
+    const hand = this.el('hand');
+    if (newOffer || hand.children.length !== offer.length) {
+      hand.innerHTML = offer
+        .map((c, i) => `<button class="tcard card-${c}" data-i="${i}">
+            <img src="${thumbs.card(c)}" alt=""><span class="name">${CARD_LABEL[c]}</span>
+            <span class="desc">${CARD_DESC[c]}</span><kbd>${i + 1}</kbd></button>`)
+        .join('');
+    }
+    hand.querySelectorAll('button').forEach((b, i) => {
+      const c = offer[i];
+      b.classList.toggle('sel', i === selected);
+      (b as HTMLButtonElement).disabled = !usable(c);
+      b.title = !usable(c) ? CARD_HINT[c] ?? '' : '';
+    });
   }
 
   setBoss(name: string | null, hp = 0, max = 1) {

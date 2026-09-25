@@ -14,15 +14,17 @@ export class BuildCameraController {
   }
 
   update(dt: number, input: InputManager) {
-    let dx = 0;
-    let dz = 0;
-    if (input.isDown('KeyW', 'ArrowUp')) dz -= 1;
-    if (input.isDown('KeyS', 'ArrowDown')) dz += 1;
-    if (input.isDown('KeyA', 'ArrowLeft')) dx -= 1;
-    if (input.isDown('KeyD', 'ArrowRight')) dx += 1;
+    // pan along the screen (the view is turned a little, as in Hexhaven)
+    let fwd = 0;
+    let side = 0;
+    if (input.isDown('KeyW', 'ArrowUp')) fwd += 1;
+    if (input.isDown('KeyS', 'ArrowDown')) fwd -= 1;
+    if (input.isDown('KeyA', 'ArrowLeft')) side -= 1;
+    if (input.isDown('KeyD', 'ArrowRight')) side += 1;
+    const yaw = THREE.MathUtils.degToRad(BUILD_CAMERA.yawDeg);
     const speed = BUILD_CAMERA.panSpeed * (this.distance / BUILD_CAMERA.distance);
-    this.focus.x += dx * speed * dt;
-    this.focus.z += dz * speed * dt;
+    this.focus.x += (-Math.sin(yaw) * fwd + Math.cos(yaw) * side) * speed * dt;
+    this.focus.z += (-Math.cos(yaw) * fwd - Math.sin(yaw) * side) * speed * dt;
     if (input.wheel) {
       this.goalDistance = clamp(this.goalDistance * Math.exp(input.wheel * 0.001), BUILD_CAMERA.minDistance, BUILD_CAMERA.maxDistance);
     }
@@ -31,7 +33,9 @@ export class BuildCameraController {
 
   desired(outPos: THREE.Vector3, outLook: THREE.Vector3) {
     const p = THREE.MathUtils.degToRad(BUILD_CAMERA.pitchDeg);
+    const yaw = THREE.MathUtils.degToRad(BUILD_CAMERA.yawDeg);
+    const flat = Math.cos(p) * this.distance;
     outLook.copy(this.focus);
-    outPos.set(0, Math.sin(p) * this.distance, Math.cos(p) * this.distance).add(outLook);
+    outPos.set(Math.sin(yaw) * flat, Math.sin(p) * this.distance, Math.cos(yaw) * flat).add(outLook);
   }
 }

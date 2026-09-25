@@ -20,7 +20,7 @@ npm run build    # type check + production build into dist/
 A roguelike run, soulslike fights, and a world you build yourself:
 
 1. **Build.** You start at your hearth (the home tile, with a campfire). Bottom right is your stack
-   of tiles; you hold three. Place them next to your land. The further a tile is from home, the
+   of tiles, as in Hexhaven: each time you choose 1 of 3 and place it next to your land. The further a tile is from home, the
    more dangerous it is.
 2. **Explore and fight.** Stamina for swings and dodge rolls (with invulnerability), a flask with
    three heals, enemies with readable wind-ups.
