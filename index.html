@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hexventure</title>
+    <meta name="description" content="Hexventure: build a hex world tile by tile, then walk into it and explore." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22%3E%3Cpath fill=%22%2358b83c%22 d=%22M12 2l8.66 5v10L12 22l-8.66-5V7z%22/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&family=Nunito:wght@600;700&display=swap" rel="stylesheet" />
+  </head>
+  <body data-mode="title">
+    <div id="app"></div>
+    <div id="hud">
+      <div id="hearts"></div>
+      <div id="buildtitle">Build mode</div>
+      <div id="hints"></div>
+      <div id="prompt"></div>
+      <div id="message"></div>
+      <div id="buildwrap">
+        <div id="buildnote"></div>
+        <div id="buildbar"></div>
+      </div>
+      <pre id="debug"></pre>
+    </div>
+    <div id="title">
+      <div class="title-inner">
+        <h1 class="logo"><span class="hex">H</span>exventure</h1>
+        <p class="tag">Build a world tile by tile, then go and explore it.</p>
+        <nav id="title-nav"></nav>
+        <p class="ver">Prototype 0.1</p>
+      </div>
+    </div>
+    <div id="modal" class="hidden"><div class="card"></div></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
