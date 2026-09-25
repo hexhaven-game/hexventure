@@ -1,6 +1,7 @@
 import type { Card } from '../game/Deck';
 import type { PlayerStats } from '../player/PlayerStats';
 import type { Thumbs } from '../rendering/Thumbs';
+import { RELICS, type RelicId } from '../game/Relics';
 
 const HEART =
   '<svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.6-9.1C.9 8.6 2.8 4.5 6.7 4.5c2.2 0 3.7 1.2 5.3 3 1.6-1.8 3.1-3 5.3-3 3.9 0 5.8 4.1 4.3 7.4C19.5 16.4 12 21 12 21z"/></svg>';
@@ -118,9 +119,29 @@ export class HUD {
     });
   }
 
-  setBoss(name: string | null, hp = 0, max = 1) {
+  setRelics(relics: RelicId[]) {
+    const el = this.el('relics');
+    const sig = relics.join();
+    if (el.dataset.sig === sig) return;
+    el.dataset.sig = sig;
+    el.innerHTML = relics
+      .map((r) => `<i style="--rc:#${RELICS[r].color.toString(16).padStart(6, '0')}" title="${RELICS[r].name}: ${RELICS[r].desc}"></i>`)
+      .join('');
+  }
+
+  // open goals and the Blight, top right under the embers
+  setGoals(lines: { text: string; blight?: boolean }[]) {
+    const el = this.el('goals');
+    const sig = lines.map((l) => l.text).join('|');
+    if (el.dataset.sig === sig) return;
+    el.dataset.sig = sig;
+    el.innerHTML = lines.map((l) => `<span class="${l.blight ? 'blight' : ''}">${l.text}</span>`).join('');
+  }
+
+  setBoss(name: string | null, hp = 0, max = 1, elite = false) {
     const b = this.el('bossbar');
     b.classList.toggle('show', !!name);
+    b.classList.toggle('elite', elite);
     if (!name) return;
     b.innerHTML = `<span>${name}</span><div><i style="width:${Math.max(0, hp / max) * 100}%"></i></div>`;
   }

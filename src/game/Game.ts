@@ -42,6 +42,9 @@ import { BRIDGE_Y, BUILD_CAMERA, CHEST_CHANCE, HEX_RADIUS, PLACE_ANIM, PLAY_CAME
 import { DEBUG_WORLD } from './debugWorld';
 import { Deck, type Card } from './Deck';
 import { SaveSystem, type SaveData, type Slot, type TileSave } from './SaveSystem';
+import { Meta } from './Meta';
+import { RELICS, relicChoice, type RelicId } from './Relics';
+import { completedGoals, goalProgress, maybeGoal, patchSize, placementHints, riverbankCut, type Goal } from './Synergy';
 
 type Mode = 'title' | 'play' | 'build';
 
@@ -66,6 +69,8 @@ interface PlaceOptions {
   opened?: boolean;
   stairs?: number | null;
   cleared?: boolean;
+  blighted?: boolean;
+  deep?: boolean;
   from?: HeldState | null;
 }
 
@@ -119,6 +124,10 @@ export class Game {
   private placed = 0;
   private won = false;
   private handIndex = 0;
+  private goals: Goal[] = [];
+  private blightTicks = 0;
+  private startBlight = 0; // the Blight level this run started at (Hearthstone)
+  private kills = 0;
   private home: HexTile | null = null;
   private debug = false;
   private fps = 60;
@@ -217,6 +226,10 @@ export class Game {
     this.fragments = 0;
     this.placed = 0;
     this.won = false;
+    this.goals = [];
+    this.blightTicks = 0;
+    this.kills = 0;
+    this.combat.blight = 0;
     this.home = null;
     this.downTimer = -1;
     if (this.debug) this.debugView.rebuild([]);
@@ -232,6 +245,8 @@ export class Game {
         opened: s.opened,
         stairs: s.stairs ?? null,
         cleared: s.cleared,
+        blighted: s.blighted,
+        deep: s.deep,
       });
       if (s.bridge !== null) this.addBridge(tile, s.bridge);
     }
@@ -244,8 +259,17 @@ export class Game {
     this.placeTile({ q: 0, r: 0 }, 'home', 0, { delay: 0.2 });
     this.home = this.grid.get({ q: 0, r: 0 })!;
     this.deck = Deck.fresh((c) => this.targetsFor(c).length > 0);
+    // what the Hearthstone carries over
+    const meta = Meta.update((m) => m.runs++);
+    this.startBlight = this.menu.blightLevel;
+    this.combat.blight = this.startBlight * 2;
+    if (meta.unlocks.includes('stack')) this.deck.count += 2;
+    if (meta.unlocks.includes('hearth')) this.stats.bonusFlasks = 1;
+    if (meta.unlocks.includes('embers')) this.stats.embers = 60;
+    this.stats.restore();
     this.beginGame(this.home.playerSpawn!, 0);
     this.hud.message('Press Tab to build: choose 1 of 3 tiles each time', 3.2);
+    if (meta.unlocks.includes('keepsake')) window.setTimeout(() => this.offerRelic('Keepsake'), 900);
   }
 
   private startDebug() {
@@ -268,6 +292,8 @@ export class Game {
     this.stats.hearts = Math.max(1, d.stats.hearts);
     this.stats.flasks = d.stats.flasks;
     this.stats.embers = d.stats.embers;
+    this.stats.relics = [...(d.stats.relics ?? [])];
+    this.stats.bonusFlasks = d.stats.bonusFlasks ?? 0;
     this.deck = new Deck();
     this.deck.canUse = (c) => this.targetsFor(c).length > 0;
     this.buildWorld(d.tiles, false);
@@ -277,6 +303,14 @@ export class Game {
     this.deck.recheck();
     this.forests = d.forests;
     this.fragments = d.fragments;
+    this.goals = d.goals ?? [];
+    this.blightTicks = d.blight?.ticks ?? 0;
+    this.startBlight = d.blight?.start ?? 0;
+    this.combat.blight = d.blight?.level ?? 0;
+    this.kills = d.kills ?? 0;
+    this.stats.costCut = riverbankCut(this.grid);
+    this.combat.clear();
+    for (const t of this.grid.tiles.values()) this.combat.spawnFor(t, false);
     this.won = !!d.won;
     if (d.pile) this.dropPile(new THREE.Vector3(d.pile.x, this.collision.groundAt(d.pile.x, d.pile.z) ?? 0, d.pile.z), d.pile.embers);
     const at = new THREE.Vector3(d.player.x, 0, d.player.z);
@@ -310,9 +344,21 @@ export class Game {
         bridge: t.bridgeDir ?? (t.bridgePending ? this.bridges.find((b) => b.tile === t)?.dir ?? null : null),
         stairs: t.stairsDir,
         cleared: t.cleared,
+        blighted: t.blighted,
+        deep: t.deep,
       })),
       player: { x: p.x, z: p.z, yaw: this.player.root.rotation.y },
-      stats: { level: { ...this.stats.level }, hearts: this.stats.hearts, flasks: this.stats.flasks, embers: this.stats.embers },
+      stats: {
+        level: { ...this.stats.level },
+        hearts: this.stats.hearts,
+        flasks: this.stats.flasks,
+        embers: this.stats.embers,
+        relics: [...this.stats.relics],
+        bonusFlasks: this.stats.bonusFlasks,
+      },
+      goals: this.goals,
+      blight: { ticks: this.blightTicks, level: this.combat.blight, start: this.startBlight },
+      kills: this.kills,
       deck: { count: this.deck.count, offer: [...this.deck.offer], boss: this.deck.boss },
       pile: this.pile ? { x: this.pile.object.position.x, z: this.pile.object.position.z, embers: this.pile.embers } : null,
       forests: this.forests,
@@ -375,16 +421,22 @@ export class Game {
   }
 
   // ---------- placing ----------
-  // the first forest always has a chest; after that it depends on the spot (so the preview matches)
-  private chestFor(coord: HexCoord, type: TileType) {
-    return type === 'forest' && (this.forests === 0 || mulberry32(hashString(`${hexKey(coord)}:chest`))() < CHEST_CHANCE);
+  // Chests: every Deep Forest (third forest of a patch) and every second hill of a range get one;
+  // otherwise the first forest always does, then it depends on the spot (so the preview matches).
+  private chestFor(coord: HexCoord, type: TileType): { chest: boolean; deep: boolean } {
+    if (type === 'forest') {
+      const deep = patchSize(this.grid, coord, 'forest') % 3 === 0;
+      return { chest: deep || this.forests === 0 || mulberry32(hashString(`${hexKey(coord)}:chest`))() < CHEST_CHANCE, deep };
+    }
+    if (type === 'hill') return { chest: patchSize(this.grid, coord, 'hill') % 2 === 0, deep: false };
+    return { chest: false, deep: false };
   }
 
   previewTile(coord: HexCoord, type: TileType, rotation: number): HexTile {
     const id = `${hexKey(coord)}|${type}|${rotation}`;
     if (this.held?.id === id) return this.held.tile;
     this.dropHeld(true); // the preview swaps it for the new one itself, keeping its hover
-    const tile = this.factory.create(coord, type, { chest: this.chestFor(coord, type), rotation });
+    const tile = this.factory.create(coord, type, { ...this.chestFor(coord, type), rotation });
     this.held = { id, tile };
     return tile;
   }
@@ -424,9 +476,81 @@ export class Game {
       this.placeTile(coord, card, rotation, { from });
     }
     this.placed++;
+    this.afterPlacement(coord);
     this.deck.take(this.handIndex);
     this.pickCard();
     if (this.deck.empty) this.hud.message('No tiles left: clear areas and open chests to find more', 3.2);
+    this.autosave();
+  }
+
+  // synergies and goals after you place something, and one tick of the Blight
+  private afterPlacement(coord: HexCoord) {
+    const tile = this.grid.get(coord);
+    this.stats.costCut = riverbankCut(this.grid);
+    for (const g of completedGoals(this.grid, this.goals)) {
+      this.deck.add(2);
+      this.hud.banner('Goal reached');
+      this.hud.message(`${g.type[0].toUpperCase() + g.type.slice(1)} of ${g.target}: +2 tiles`, 2.6);
+    }
+    this.goals = this.goals.filter((g) => !g.done);
+    if (tile) {
+      const g = maybeGoal(this.grid, tile, this.goals);
+      if (g) this.hud.message(`New goal: grow this ${g.type} to ${g.target} tiles`, 2.8);
+      if (tile.deep) this.hud.message('Deep Forest: something strong guards a chest here', 2.8);
+    }
+    this.tickBlight();
+  }
+
+  // ---------- the Blight ----------
+  // Every few actions (placing a tile, resting) the Blight takes a tile at the edge of your land:
+  // every enemy there becomes an elite, and cleansing it pays well. It keeps the pressure on and
+  // makes endless safe farming near home impossible.
+  private tickBlight() {
+    if (!this.inGame) return;
+    this.blightTicks++;
+    const every = this.startBlight > 0 ? 3 : 4;
+    if (this.blightTicks < every) return;
+    this.blightTicks = 0;
+    const candidates = [...this.grid.tiles.values()].filter(
+      (t) => t.ready && t.isLand && !t.blighted && ['meadow', 'forest', 'hill'].includes(t.type),
+    );
+    if (!candidates.length) return;
+    const far = Math.max(...candidates.map((t) => dangerOf(t)));
+    const edge = candidates.filter((t) => dangerOf(t) >= far - 1);
+    const tile = edge[Math.floor(Math.random() * edge.length)];
+    tile.blighted = true;
+    tile.cleared = false;
+    this.factory.refresh(tile);
+    tile.spawns = planSpawns(tile);
+    this.combat.removeOn(tile.key);
+    this.combat.spawnFor(tile);
+    this.combat.blight++;
+    this.hud.banner('The Blight spreads', 'bad');
+    this.rings.shock(tile.center.clone().setY(tile.groundHeight), HEX_RADIUS * 1.1, 0x9a5cd6);
+  }
+
+  // Memories carry over between runs (more on a higher Blight level)
+  private remember(n: number) {
+    Meta.update((m) => (m.memories += Math.round(n * (1 + 0.5 * this.startBlight))));
+  }
+
+  // choose 1 of 3 relics; the game waits meanwhile
+  private offerRelic(title: string) {
+    const choice = relicChoice(this.stats.relics);
+    if (!choice.length) return;
+    this.paused = true;
+    this.menu.showRelics(choice, title, (r) => {
+      this.paused = false;
+      if (r) this.gainRelic(r);
+    });
+  }
+
+  private gainRelic(r: RelicId) {
+    if (this.stats.has(r)) return;
+    this.stats.relics.push(r);
+    if (r === 'emberheart') this.stats.hearts++;
+    if (r === 'deepflask') this.stats.flasks++;
+    this.hud.message(`${RELICS[r].name}: ${RELICS[r].desc}`, 2.6);
     this.autosave();
   }
 
@@ -437,7 +561,8 @@ export class Game {
       this.held = null;
     } else {
       this.dropHeld();
-      tile = this.factory.create(coord, type, { chest: opts.chest ?? this.chestFor(coord, type), rotation, stairs: opts.stairs ?? null });
+      const found = opts.chest === undefined ? this.chestFor(coord, type) : { chest: opts.chest, deep: !!opts.deep };
+      tile = this.factory.create(coord, type, { ...found, rotation, stairs: opts.stairs ?? null, blighted: opts.blighted });
     }
     if (type === 'forest') this.forests++;
     tile.cleared = !!opts.cleared;
@@ -608,14 +733,21 @@ export class Game {
 
   // ---------- fighting, dying, resting ----------
   private onKill(e: Enemy) {
-    this.stats.embers += e.embers;
+    this.stats.embers += Math.round(e.embers * this.stats.emberMul * (e.elite ? 2 : 1));
+    this.kills++;
+    if (this.stats.has('fang') && this.kills % 3 === 0 && this.stats.hearts < this.stats.maxHearts) {
+      this.stats.hearts++;
+      this.hud.message('Hungry Fang: +1 heart', 1.4);
+    }
     const tile = this.grid.tiles.get(e.tileKey);
     if (!tile) return;
     if (e.bossName && tile.type === 'lair') {
       tile.cleared = true;
       tile.spawns = [];
       this.fragments++;
+      this.remember(10);
       this.hud.banner('World Fragment obtained');
+      window.setTimeout(() => this.offerRelic('The lair held a relic'), 1400);
       if (this.fragments >= RUN.fragmentsToWin && !this.deck.boss && !this.won) {
         this.deck.boss = true;
         if (this.deck.count <= 0) this.deck.count = 1;
@@ -626,6 +758,11 @@ export class Game {
       tile.cleared = true;
       tile.spawns = [];
       this.won = true;
+      this.remember(40);
+      Meta.update((m) => {
+        m.wins++;
+        m.maxBlight = Math.max(m.maxBlight, this.startBlight + 1);
+      });
       this.hud.banner('Victory');
       window.setTimeout(() => {
         this.paused = true;
@@ -639,14 +776,35 @@ export class Game {
       }, 1800);
     } else if (!tile.cleared && tile.spawns.length && !this.combat.aliveOn(tile.key)) {
       tile.cleared = true;
-      this.deck.add(1);
-      this.hud.banner('Area cleared');
-      this.hud.message('+1 tile in your stack', 2);
+      if (tile.blighted) {
+        // cleansed: the Blight leaves, and pays well
+        tile.blighted = false;
+        this.factory.refresh(tile);
+        tile.spawns = planSpawns(tile);
+        this.deck.add(2);
+        this.remember(3);
+        this.hud.banner('Blight cleansed');
+        this.hud.message('+2 tiles', 2);
+        window.setTimeout(() => this.offerRelic('The Blight left something behind'), 1200);
+      } else {
+        this.deck.add(1);
+        this.remember(1);
+        this.hud.banner('Area cleared');
+        this.hud.message('+1 tile in your stack', 2);
+      }
     }
     this.autosave();
   }
 
   private die() {
+    if (this.stats.has('secondwind')) {
+      // used up: get back up with one heart
+      this.stats.relics = this.stats.relics.filter((r) => r !== 'secondwind');
+      this.stats.hearts = 1;
+      this.combat.invulnerable = 2;
+      this.hud.banner('Second Wind');
+      return;
+    }
     this.downTimer = 2.2;
     this.hud.banner('You died', 'bad');
     // your embers stay where you fell; an older pile is lost
@@ -668,6 +826,7 @@ export class Game {
     this.stats.restore();
     this.combat.clear();
     for (const t of this.grid.tiles.values()) if (t.ready) this.combat.spawnFor(t, false);
+    if (message) this.tickBlight();
     // never get stuck: out of tiles with nothing left to clear or open, the fire shows new land
     const stuck =
       this.deck.empty &&
@@ -738,7 +897,12 @@ export class Game {
       if (card === 'boss') return 'The boss must go at least three tiles from home.';
       return 'Nowhere to put this one yet.';
     }
-    if (card !== 'bridge' && card !== 'stairs') return 'Choose 1 tile to place';
+    const at = this.build.hovered;
+    if (at) {
+      const hints = placementHints(this.grid, at, card, this.goals);
+      if (hints.length) return hints.join(' · ');
+    }
+    if (card !== 'bridge' && card !== 'stairs') return '';
     if (card === 'bridge') return 'Click a highlighted water tile.';
     if (card === 'stairs') return 'Click a highlighted hill, near the side the stairs should face.';
     return '';
@@ -862,6 +1026,13 @@ export class Game {
       this.hud.setCurrency(this.stats.embers, this.fragments, RUN.fragmentsToWin);
       this.hud.setDeck(this.deck.offer, this.deck.count, this.mode === 'build' ? this.handIndex : -1, this.mode === 'build', (c) => this.deck.canUse(c), this.thumbs);
       this.updateBossBar();
+      this.hud.setRelics(this.stats.relics);
+      const lines = this.goals
+        .filter((g) => !g.done && this.grid.tiles.has(g.anchor))
+        .map((g) => ({ text: `Grow ${g.type} ${goalProgress(this.grid, g)}/${g.target}` }));
+      const blighted = [...this.grid.tiles.values()].filter((t) => t.blighted).length;
+      if (blighted) lines.push({ text: `Blight ${blighted} · cleanse for tiles`, blight: true } as { text: string; blight?: boolean });
+      this.hud.setGoals(lines);
     }
     if (this.debug) this.showDebug();
     else this.hud.setDebug(null);
@@ -875,10 +1046,11 @@ export class Game {
 
   private updateBossBar() {
     const p = this.player.root.position;
-    const boss = this.mode === 'play'
-      ? this.combat.enemies.find((e) => e.bossName && e.alive && e.state !== 'idle' && e.root.position.distanceTo(p) < 24)
-      : undefined;
-    this.hud.setBoss(boss?.bossName ?? null, boss?.hp, boss?.maxHp);
+    const engaged = (e: Enemy, r: number) => e.alive && e.state !== 'idle' && e.root.position.distanceTo(p) < r;
+    const boss = this.mode === 'play' ? this.combat.enemies.find((e) => e.bossName && engaged(e, 24)) : undefined;
+    const elite = !boss && this.mode === 'play' ? this.combat.enemies.find((e) => e.elite && e.alive && e.root.position.distanceTo(p) < 11) : undefined;
+    const shown = boss ?? elite;
+    this.hud.setBoss(shown?.displayName ?? null, shown?.hp, shown?.maxHp, !boss && !!elite);
   }
 
   // E: open a chest, rest at the campfire, use a shrine; walking over your ember pile takes it back
@@ -928,14 +1100,16 @@ export class Game {
     chest.open();
     const tile = this.grid.tiles.get(chest.tileKey);
     if (tile) tile.chestOpened = true;
-    const far = tile ? dangerOf(tile) >= 2 : false;
-    const tiles = far ? 3 : 2;
-    const embers = far ? 60 : 30;
+    // far out, in a Deep Forest or on the Highlands a chest holds a relic; closer to home, tiles
+    const relic = !!tile && (dangerOf(tile) >= 2 || tile.deep || tile.type === 'hill');
+    const tiles = (relic ? 1 : 2) + (this.stats.has('tilefinder') ? 1 : 0);
+    const embers = relic ? 50 : 30;
     this.deck.add(tiles);
     this.stats.embers += embers;
     const at = chest.worldPosition.clone().setY(chest.worldPosition.y + 1);
     this.particles.burst(at, [0xffe27a, 0xffffff, 0xf0c040], 30, 4, 0.14, 6);
-    this.hud.message(`Treasure: +${tiles} tiles, +${embers} embers`);
+    this.hud.message(`Treasure: +${tiles} tile${tiles === 1 ? '' : 's'}, +${embers} embers`);
+    if (relic) window.setTimeout(() => this.offerRelic('Inside the chest'), 700);
     this.autosave();
   }
 

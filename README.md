@@ -17,23 +17,29 @@ npm run build    # type check + production build into dist/
 
 ## The loop
 
-A roguelike run, soulslike fights, and a world you build yourself:
+A roguelike run, soulslike fights, and a world you build yourself. It is designed to keep asking
+something new of you from the first tile to the boss:
 
-1. **Build.** You start at your hearth (the home tile, with a campfire). Bottom right is your stack
-   of tiles, as in Hexhaven: each time you choose 1 of 3 and place it next to your land. The further a tile is from home, the
-   more dangerous it is.
-2. **Explore and fight.** Stamina for swings and dodge rolls (with invulnerability), a flask with
-   three heals, enemies with readable wind-ups.
-3. **Earn.** Enemies drop embers. Beating everything on a tile earns a new tile. Chests give tiles
-   and embers. Lairs (miniboss tiles) give World Fragments.
-4. **Die, souls-style.** Your embers stay where you fell and you wake at the hearth; get back to
-   them before you die again. Resting at the campfire heals and refills the flask, but the
-   enemies return.
-5. **Grow.** Spend embers at a Shrine tile: more hearts, more stamina, a stronger sword.
-6. **Win the run.** Three fragments put the Boss tile in your hand. Place it far from home and beat
-   the Hollow King.
-
-Bridges, stairs, lairs and the boss only come into your hand when there is a place for them.
+1. **Build (choices that matter).** Bottom right is your stack of tiles, as in Hexhaven: each time
+   you choose 1 of 3. Where you put it matters:
+   - every third forest in a forest is a **Deep Forest** (chest + elite),
+   - every second hill in a range gets a **chest on top** (reach it with stairs),
+   - meadows by the water (**Riverbank**) make the shrine cheaper,
+   - new patches can come with a **goal** (grow it to 3–5 for two tiles).
+   The further from home, the more dangerous.
+2. **Explore and fight.** Stamina for swings and dodge rolls (with invulnerability), a flask, and
+   enemies with readable wind-ups. Elites (Swift, Armoured, Splitting) show up further out.
+3. **Earn.** Clearing a tile gives a tile; chests give tiles or, further out, a **relic** (1 of 3,
+   for this run); lairs give World Fragments and a relic.
+4. **Pressure: the Blight.** Every few tiles (and every rest) it takes a tile at the edge of your
+   land: all elites there. Cleansing it pays well. It keeps you moving and stops safe farming.
+5. **Die, souls-style.** Your embers stay where you fell; get back to them before you die again.
+   Resting heals and refills the flask, but the enemies return (and the Blight ticks).
+6. **Grow.** Spend embers at a Shrine: hearts, stamina, sword.
+7. **Win the run.** Three fragments make the Boss tile appear among your choices. Place it far out
+   and beat the Hollow King.
+8. **Between runs: the Hearthstone.** Memories (from clearing, cleansing, lairs and the boss) buy
+   permanent unlocks, and a win unlocks a higher Blight level: harder, faster, more memories.
 
 ### Enemies
 
@@ -46,7 +52,12 @@ Bridges, stairs, lairs and the boss only come into your hand when there is a pla
 | Thornspitter | danger 2–3 | rooted plant that spits thorns | roll through the thorns or get close |
 | Grove Warden (miniboss) | lair | giant husk; leaps and slams (red ring) | stay mobile |
 | Slime King (miniboss) | lair | jumps onto a marked spot, sheds slimes | watch the ring |
+| Rockling | hills (danger 1+) | throws stones, slams the ground up close (red ring) | fight it on the hilltop, dodge the stones |
+| Marsh Wisp | water (danger 1+) | floats over the water, keeps its distance, fires slow orbs | catch it near the shore |
 | The Hollow King (boss) | boss tile | crowned Warden; enrages at half health and calls bats | everything above |
+
+Any enemy can be an **elite**: Swift (faster), Armoured (takes less damage, much more health) or
+Splitting (breaks into slimes). Elites have a coloured ring, a health bar and drop double embers.
 
 ## Controls
 
@@ -89,7 +100,8 @@ chest chance.
 
 ```text
 src/
-  game/        Game.ts (main loop, modes, the run), config.ts, Deck.ts, SaveSystem.ts, debugWorld.ts
+  game/        Game.ts (main loop, modes, the run), config.ts, Deck.ts, Synergy.ts, Relics.ts,
+               Meta.ts (between runs), SaveSystem.ts, debugWorld.ts
   world/       HexGrid.ts (axial coords: hexToWorld, worldToHex, getNeighbors), HexTile.ts,
                TileFactory.ts (terrain, shores, decoration), props.ts, Bridge.ts, Chest.ts,
                Collision.ts (ground height per hex, step/cliff check, circle colliders),
@@ -99,7 +111,8 @@ src/
   camera/      PlayCameraController.ts, BuildCameraController.ts
   build/       BuildController.ts, TilePreview.ts, GridOverlay.ts
   combat/      CombatSystem.ts, Projectiles.ts, spawns.ts (who lives where),
-               enemies/ (Enemy base + Slime, Bat, Husk, Boar, Spitter, Warden, SlimeKing, HollowKing)
+               enemies/ (Enemy base with elites + Slime, Bat, Husk, Boar, Spitter, Rockling, Wisp,
+               Warden, SlimeKing, HollowKing)
   rendering/   Environment.ts, Lighting.ts, Particles.ts, Rings.ts, Occlusion.ts, WaterMaterial.ts,
                LandingMaterial.ts
   input/       InputManager.ts

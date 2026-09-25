@@ -83,7 +83,7 @@ export class Husk extends Enemy {
           this.struck = true;
           const f = this.forward;
           const inFront = dir.dot(f) > Math.cos(THREE.MathUtils.degToRad(70));
-          if (dist < this.reach && inFront) ctx.hurtPlayer(this.root.position, 1, 13);
+          if (dist < this.reach && inFront) ctx.hurtPlayer(this.root.position, 1, 13, this);
         }
         if (this.stateT > 0.3) this.setState('recover');
         break;

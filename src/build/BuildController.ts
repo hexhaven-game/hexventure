@@ -29,6 +29,7 @@ const COLOR: Partial<Record<Card, number>> = { bridge: 0xffd35a, stairs: 0xffd35
 // rotate, click to place.
 export class BuildController {
   card: Card | null = null;
+  hovered: HexCoord | null = null; // the valid spot under the cursor
   rotation = 0;
   private d: Deps;
   private valid = new Map<string, Target>();
@@ -93,6 +94,7 @@ export class BuildController {
     const h = cursor ? worldToHex(cursor.x, cursor.z) : null;
     const target = h ? this.valid.get(hexKey(h)) ?? null : null;
     this.d.overlay.setHover(target ? hexKey(target.coord) : null);
+    this.hovered = target?.coord ?? null;
 
     let dir: number | null = null;
     if (target?.dirs?.length) {

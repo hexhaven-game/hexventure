@@ -2,6 +2,8 @@ import changelogMd from '../../CHANGELOG.md?raw';
 import { RUN } from '../game/config';
 import { SaveSystem, SLOTS, type Slot } from '../game/SaveSystem';
 import type { PlayerStats, StatKind } from '../player/PlayerStats';
+import { Meta, UNLOCKS, type UnlockId } from '../game/Meta';
+import { RELICS, type RelicId } from '../game/Relics';
 
 // ---------- changelog (the same CHANGELOG.md as in the repo root) ----------
 interface Release {
@@ -83,6 +85,7 @@ export class Menu {
       if (act === 'debug') this.a.debugWorld();
       if (act === 'load') this.showSlots('load');
       if (act === 'controls') this.showControls();
+      if (act === 'hearthstone') this.showHearthstone(() => this.showTitle());
     });
     document.getElementById('version')!.addEventListener('click', () => this.showChangelog());
     this.modal.addEventListener('click', (e) => {
@@ -103,6 +106,7 @@ export class Menu {
       resume || auto ? item('continue', 'Continue', resume ? 'Back to your world' : SaveSystem.describe(auto!)) : '',
       item('new', 'New world', 'Start with one home tile'),
       item('load', 'Load'),
+      item('hearthstone', 'Hearthstone', this.metaLine()),
       item('debug', 'Debug world', 'Everything already built'),
       item('controls', 'Controls'),
     ].join('');
@@ -156,6 +160,85 @@ export class Menu {
       },
     );
     this.onModalClose = onResume;
+  }
+
+  // the next run's Blight level (chosen at the Hearthstone)
+  blightLevel = 0;
+
+  private metaLine() {
+    const m = Meta.read();
+    return `${m.memories} memories · ${m.unlocks.length} of ${Object.keys(UNLOCKS).length} unlocks${this.blightLevel ? ` · Blight ${this.blightLevel}` : ''}`;
+  }
+
+  // Memories carry over between runs; spend them here on permanent unlocks, and pick how hard the
+  // Blight starts (unlocked by winning).
+  showHearthstone(onClose: () => void) {
+    const draw = () => {
+      const m = Meta.read();
+      this.blightLevel = Math.min(this.blightLevel, m.maxBlight);
+      const rows = (Object.keys(UNLOCKS) as UnlockId[])
+        .map((id) => {
+          const u = UNLOCKS[id];
+          const owned = m.unlocks.includes(id);
+          return `<button class="up" data-u="${id}" ${owned || m.memories < u.cost ? 'disabled' : ''}>
+            <b>${u.name}</b><small>${owned ? 'Unlocked' : `${u.desc} · ${u.cost}`}</small></button>`;
+        })
+        .join('');
+      const levels = Array.from({ length: m.maxBlight + 1 }, (_, i) => `<button class="lvl ${i === this.blightLevel ? 'on' : ''}" data-b="${i}">${i}</button>`).join('');
+      this.card.querySelector('.mbody')!.innerHTML = `
+        <h2>Hearthstone</h2>
+        <p class="note">What you keep between runs. You have <b>${m.memories}</b> memories (from clearing areas, cleansing the Blight, lairs and the boss). Runs: ${m.runs} · wins: ${m.wins}.</p>
+        <div class="ups">${rows}</div>
+        <h3 style="margin-top:16px">Blight level for the next run</h3>
+        <p class="note">${m.maxBlight ? 'Higher levels: tougher enemies, a faster Blight, more memories.' : 'Win a run to unlock harder Blight levels.'}</p>
+        <div class="lvls">${levels}</div>`;
+    };
+    this.open('');
+    draw();
+    this.card.querySelector('.mbody')!.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('button') as HTMLButtonElement | null;
+      if (!b || b.disabled) return;
+      if (b.dataset.u) {
+        const id = b.dataset.u as UnlockId;
+        Meta.update((m) => {
+          if (m.memories >= UNLOCKS[id].cost && !m.unlocks.includes(id)) {
+            m.memories -= UNLOCKS[id].cost;
+            m.unlocks.push(id);
+          }
+        });
+      }
+      if (b.dataset.b) this.blightLevel = Number(b.dataset.b);
+      draw();
+    });
+    this.onModalClose = onClose;
+  }
+
+  // choose 1 of up to 3 relics; the game waits until you pick
+  showRelics(choice: RelicId[], title: string, onPick: (r: RelicId | null) => void) {
+    if (!choice.length) {
+      onPick(null);
+      return;
+    }
+    this.open(
+      `<h2>${title}</h2><p class="note">Choose one. It stays with you for the rest of this run.</p>
+       <div class="relics">${choice
+         .map((id) => {
+           const r = RELICS[id];
+           return `<button class="relic" data-r="${id}" style="--rc:#${r.color.toString(16).padStart(6, '0')}"><i></i><b>${r.name}</b><small>${r.desc}</small></button>`;
+         })
+         .join('')}</div>`,
+      (card) => {
+        card.querySelector('.relics')!.addEventListener('click', (e) => {
+          const b = (e.target as HTMLElement).closest('button') as HTMLButtonElement | null;
+          if (!b) return;
+          this.onModalClose = null;
+          this.closeModal();
+          onPick(b.dataset.r as RelicId);
+        });
+      },
+    );
+    // closing without choosing still gives the first one: a chest is never wasted
+    this.onModalClose = () => onPick(choice[0]);
   }
 
   showChangelog(onClose?: () => void) {

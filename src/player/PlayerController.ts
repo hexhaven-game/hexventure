@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { FLASK, PLAYER, ROLL, STAMINA } from '../game/config';
+import { FLASK, PLAYER, ROLL } from '../game/config';
 import type { InputManager } from '../input/InputManager';
 import { damp, dampAngle, dampFactor } from '../utils/math';
 import type { WorldCollision } from '../world/Collision';
@@ -12,6 +12,7 @@ export class PlayerController {
   readonly velocity = new THREE.Vector3();
   groundY = 0;
   rollT = -1;
+  rollId = 0; // counts rolls (a flame trail burns each enemy once per roll)
   drinkT = -1;
   private rollDir = new THREE.Vector3();
   private healed = false;
@@ -82,8 +83,9 @@ export class PlayerController {
 
     // dodge roll: in the direction you hold, or forward
     if (enabled && (i.wasPressed('ShiftLeft') || i.wasPressed('ShiftRight') || i.consumeRightClick()) && this.free && !this.player.attacking) {
-      if (this.stats.spend(STAMINA.roll)) {
+      if (this.stats.spend(this.stats.rollCost)) {
         this.rollT = 0;
+        this.rollId++;
         if (this.wish.lengthSq() > 0) this.rollDir.copy(this.wish);
         else this.rollDir.set(Math.sin(root.rotation.y), 0, Math.cos(root.rotation.y));
         root.rotation.y = Math.atan2(this.rollDir.x, this.rollDir.z);
@@ -103,7 +105,7 @@ export class PlayerController {
       if (this.rollT >= ROLL.time) this.rollT = -1;
     } else {
       const slow = this.player.attacking ? 0.35 : this.drinking ? 0.3 : 1;
-      this.velocity.lerp(this.wish.multiplyScalar(PLAYER.speed * slow), dampFactor(PLAYER.accel, dt));
+      this.velocity.lerp(this.wish.multiplyScalar(PLAYER.speed * slow * this.stats.speedMul), dampFactor(PLAYER.accel, dt));
     }
     if (this.drinking) {
       this.drinkT += dt;

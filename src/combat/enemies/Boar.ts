@@ -96,7 +96,7 @@ export class Boar extends Enemy {
         legSpeed = 22;
         if (!this.struck && dist < 1.4) {
           this.struck = true;
-          ctx.hurtPlayer(this.root.position, 1, 16);
+          ctx.hurtPlayer(this.root.position, 1, 16, this);
         }
         const moved = this.root.position.distanceTo(this.last);
         this.last.copy(this.root.position);

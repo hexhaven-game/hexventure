@@ -2,14 +2,19 @@ import * as THREE from 'three';
 import { dampAngle, damp } from '../../utils/math';
 import type { WorldCollision } from '../../world/Collision';
 
-export type EnemyKind = 'slime' | 'husk' | 'spitter' | 'bat' | 'boar';
+export type EnemyKind = 'slime' | 'husk' | 'spitter' | 'bat' | 'boar' | 'rockling' | 'wisp';
+
+// elites: a tougher version with one twist
+export type Elite = 'swift' | 'armored' | 'splitting';
+export const ELITE_NAME: Record<Elite, string> = { swift: 'Swift', armored: 'Armoured', splitting: 'Splitting' };
+const ELITE_COLOR: Record<Elite, number> = { swift: 0x5ad0ff, armored: 0xffc040, splitting: 0x9dff6a };
 
 // what an enemy may know about and do to the world
 export interface EnemyCtx {
   player: THREE.Vector3; // feet
   collision: WorldCollision;
-  hurtPlayer: (from: THREE.Vector3, damage: number, knock: number) => void;
-  shoot: (from: THREE.Vector3, target: THREE.Vector3) => void;
+  hurtPlayer: (from: THREE.Vector3, damage: number, knock: number, source?: Enemy) => void;
+  shoot: (from: THREE.Vector3, target: THREE.Vector3, kind?: 'thorn' | 'rock' | 'orb') => void;
   // a ring on the ground that warns where a big attack lands
   telegraph: (at: THREE.Vector3, radius: number, time: number) => void;
   // a big landing: dust ring, hurts the player inside `radius`
@@ -28,6 +33,7 @@ export abstract class Enemy {
   hp: number;
   readonly maxHp: number;
   bossName: string | null = null; // minibosses and bosses get a health bar
+  elite: Elite | null = null;
   state = 'idle';
   stateT = 0;
   lastHitSwing = -1;
@@ -70,6 +76,30 @@ export abstract class Enemy {
     });
   }
 
+  // make this an elite: more health, bigger, a coloured glow, and its twist
+  makeElite(kind: Elite) {
+    this.elite = kind;
+    const extra = kind === 'armored' ? 2 : 1.5;
+    this.hp = Math.ceil(this.hp * extra);
+    (this as { maxHp: number }).maxHp = this.hp;
+    this.body.scale.multiplyScalar(1.2);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.9, 1.15, 32).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: ELITE_COLOR[kind], transparent: true, opacity: 0.7, depthWrite: false }),
+    );
+    ring.position.y = 0.06;
+    ring.scale.setScalar(this.radius * 1.4 + 0.3);
+    this.root.add(ring);
+    for (const m of this.flashMats) m.emissive.setHex(ELITE_COLOR[kind]).multiplyScalar(0.15);
+    this.glow = ELITE_COLOR[kind];
+  }
+
+  private glow = 0;
+
+  get displayName() {
+    return this.bossName ?? (this.elite ? `${ELITE_NAME[this.elite]} ${this.kind}` : null);
+  }
+
   get alive() {
     return !this.dead;
   }
@@ -101,7 +131,7 @@ export abstract class Enemy {
   // returns true when this hit killed it
   hit(from: THREE.Vector3, damage: number): boolean {
     if (this.dead) return false;
-    this.hp -= damage;
+    this.hp -= this.elite === 'armored' ? damage * 0.75 : damage;
     this.flashT = 0.14;
     this.knock.set(this.root.position.x - from.x, 0, this.root.position.z - from.z).normalize().multiplyScalar(10 / this.weight);
     if (this.hp <= 0) {
@@ -116,7 +146,11 @@ export abstract class Enemy {
   update(dt: number, ctx: EnemyCtx) {
     this.stateT += dt;
     this.flashT = Math.max(0, this.flashT - dt);
-    for (const m of this.flashMats) m.emissive.setScalar(this.flashT > 0 ? 0.85 : 0);
+    for (const m of this.flashMats) {
+      if (this.flashT > 0) m.emissive.setScalar(0.85);
+      else if (this.glow) m.emissive.setHex(this.glow).multiplyScalar(0.18 + Math.sin(this.stateT * 4) * 0.05);
+      else m.emissive.setScalar(0);
+    }
     if (this.dead) {
       this.deathT += dt;
       const k = Math.max(0, 1 - this.deathT / 0.3);
@@ -129,6 +163,7 @@ export abstract class Enemy {
       if (this.stateT > 0.35) this.setState('chase');
     } else this.think(dt, ctx);
 
+    if (this.elite === 'swift') this.speed *= 1.5;
     const vx = this.move.x * this.speed + this.knock.x;
     const vz = this.move.z * this.speed + this.knock.z;
     this.knock.multiplyScalar(Math.exp(-8 * dt));

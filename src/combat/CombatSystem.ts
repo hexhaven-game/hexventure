@@ -20,6 +20,8 @@ const COLORS: Record<string, number[]> = {
   spitter: [0xc2405a, 0x4caf50],
   bat: [0x4a3a66, 0xffe066],
   boar: [0x7a4b2e, 0xc98a6a],
+  rockling: [0x8f8a80, 0x4affd0],
+  wisp: [0xbff8ff, 0x3ad8ff],
 };
 
 interface Deps {
@@ -39,6 +41,7 @@ interface Deps {
 export class CombatSystem {
   readonly enemies: Enemy[] = [];
   invulnerable = 0;
+  blight = 0; // how far the Blight has spread (enemies get tougher)
   private d: Deps;
   private projectiles: Projectiles;
   private ctx: EnemyCtx;
@@ -49,8 +52,8 @@ export class CombatSystem {
     this.ctx = {
       player: deps.player.root.position,
       collision: deps.collision,
-      hurtPlayer: (from, damage, knock) => this.hurtPlayer(from, damage, knock),
-      shoot: (from, target) => this.projectiles.shoot(from, target),
+      hurtPlayer: (from, damage, knock, source) => this.hurtPlayer(from, damage, knock, source),
+      shoot: (from, target, kind) => this.projectiles.shoot(from, target, kind),
       telegraph: (at, radius, time) => deps.rings.telegraph(at, radius, time),
       slam: (at, radius, knock) => {
         deps.rings.shock(at, radius * 1.3, 0xf1dea4);
@@ -61,7 +64,7 @@ export class CombatSystem {
       summon: (kind, at, tileKey) => {
         const y = deps.collision.groundAt(at.x, at.z);
         if (y === null) return;
-        const e = createEnemy({ kind, x: at.x, z: at.z }, y, { key: tileKey, coord: { q: 0, r: 0 } });
+        const e = createEnemy({ kind, x: at.x, z: at.z }, y, { key: tileKey, coord: { q: 0, r: 0 } }, this.blight);
         this.enemies.push(e);
         deps.scene.add(e.root);
         deps.particles.burst(at.clone().setY(y + 0.5), COLORS[e.kind], 12, 3, 0.14);
@@ -72,7 +75,7 @@ export class CombatSystem {
   spawnFor(tile: HexTile, poof = true) {
     for (const s of tile.spawns) {
       const y = this.d.collision.groundAt(s.x, s.z) ?? tile.groundHeight;
-      const e = createEnemy(s, y, tile);
+      const e = createEnemy(s, y, tile, this.blight);
       this.enemies.push(e);
       this.d.scene.add(e.root);
       if (poof) this.d.particles.burst(new THREE.Vector3(s.x, y + 0.5, s.z), COLORS[e.kind], 12, 3, 0.14);
@@ -85,13 +88,24 @@ export class CombatSystem {
     this.projectiles.clear();
   }
 
+  // take away the enemies of one tile (before the Blight respawns them as elites)
+  removeOn(tileKey: string) {
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      if (this.enemies[i].tileKey !== tileKey) continue;
+      this.d.scene.remove(this.enemies[i].root);
+      this.enemies.splice(i, 1);
+    }
+  }
+
   aliveOn(tileKey: string) {
     return this.enemies.some((e) => e.alive && e.tileKey === tileKey);
   }
 
-  private hurtPlayer(from: THREE.Vector3, damage: number, knock: number) {
+  private hurtPlayer(from: THREE.Vector3, damage: number, knock: number, source?: Enemy) {
     const { stats, controller } = this.d;
     if (this.invulnerable > 0 || controller.iframes || stats.hearts <= 0) return false;
+    // Thorn Mail: whoever hits you gets hurt too
+    if (source && stats.has('thornmail') && source.alive) this.damage(source, 1);
     stats.hearts = Math.max(0, stats.hearts - damage);
     this.invulnerable = PLAYER.invulnerable;
     this.d.player.hurt();
@@ -103,10 +117,37 @@ export class CombatSystem {
     return true;
   }
 
+  private burned = new WeakMap<Enemy, number>();
+
+  // any damage to an enemy, from any source; handles deaths (and splitting elites)
+  private damage(e: Enemy, amount: number) {
+    const killed = e.hit(this.d.player.root.position, amount);
+    if (!killed) return;
+    const at = e.root.position.clone().setY(e.root.position.y + 0.8);
+    this.d.particles.burst(at, [...COLORS[e.kind], 0xffffff], 26, 6, 0.2, 4);
+    if (e.elite === 'splitting') {
+      for (const a of [0, Math.PI]) this.ctx.summon('slime', e.root.position.clone().add(new THREE.Vector3(Math.cos(a) * 1.4, 0, Math.sin(a) * 1.4)), e.tileKey);
+    }
+    this.d.onKill(e);
+  }
+
   update(dt: number) {
     const { player, particles, stats } = this.d;
     const pos = player.root.position;
     this.invulnerable = Math.max(0, this.invulnerable - dt);
+
+    // Flame Trail: rolling through enemies burns them (once per enemy per roll)
+    if (this.d.controller.rolling && stats.has('flametrail')) {
+      const id = this.d.controller.rollId;
+      for (const e of this.enemies) {
+        if (!e.alive || this.burned.get(e) === id) continue;
+        if (Math.hypot(e.root.position.x - pos.x, e.root.position.z - pos.z) < 1.2 + e.radius) {
+          this.burned.set(e, id);
+          this.damage(e, 1);
+          particles.burst(e.root.position.clone().setY(e.root.position.y + 0.6), [0xff6a10, 0xffb040], 10, 3, 0.12);
+        }
+      }
+    }
 
     // sword hits land in the middle of the swing, once per enemy per swing
     const s = player.swing;
@@ -118,16 +159,12 @@ export class CombatSystem {
         const dx = e.root.position.x - pos.x;
         const dz = e.root.position.z - pos.z;
         const dist = Math.hypot(dx, dz);
-        if (dist > SWORD_REACH + e.radius * 0.5) continue;
+        if (dist > SWORD_REACH * stats.reachMul + e.radius * 0.5) continue;
         if (dist > 0.3 && Math.acos(Math.max(-1, Math.min(1, (dx * fx + dz * fz) / dist))) > SWORD_ARC) continue;
         e.lastHitSwing = player.swingId;
         const at = e.root.position.clone().setY(e.root.position.y + 0.8);
-        const killed = e.hit(pos, stats.damage);
         particles.burst(at, [0xffffff, 0xffe27a], 10, 5, 0.1, 2);
-        if (killed) {
-          particles.burst(at, [...COLORS[e.kind], 0xffffff], 26, 6, 0.2, 4);
-          this.d.onKill(e);
-        }
+        this.damage(e, stats.damage);
       }
     }
 

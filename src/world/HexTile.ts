@@ -51,6 +51,8 @@ export class HexTile {
   stairsDir: number | null = null; // hills: stairs up from this side
   spawns: SpawnPoint[] = []; // enemies that live here (they come back when you rest)
   cleared = false; // all of them beaten once: the reward is paid
+  blighted = false; // taken by the Blight: purple, every enemy an elite, a bigger reward
+  deep = false; // a Deep Forest: every third forest of a cluster (a chest and an elite)
   interact: THREE.Vector3 | null = null; // campfire or shrine (world)
   chestOpened = false;
   enemyAlive = false; // the forest slime is still around

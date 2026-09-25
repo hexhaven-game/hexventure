@@ -62,7 +62,7 @@ export class Slime extends Enemy {
         this.speed = 9;
         if (!this.struck && dist < 1.25) {
           this.struck = true;
-          ctx.hurtPlayer(this.root.position, 1, 9);
+          ctx.hurtPlayer(this.root.position, 1, 9, this);
         }
         if (this.stateT > 0.2) this.setState('recover');
         break;

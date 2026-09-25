@@ -73,7 +73,7 @@ export class Bat extends Enemy {
         this.speed = 10;
         if (!this.struck && dist < 1.0) {
           this.struck = true;
-          ctx.hurtPlayer(this.root.position, 1, 6);
+          ctx.hurtPlayer(this.root.position, 1, 6, this);
         }
         if (this.stateT > 0.55) {
           this.attackIn = 1.8 + Math.random() * 1.4;

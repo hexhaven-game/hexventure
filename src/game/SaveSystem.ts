@@ -1,6 +1,8 @@
 import type { StatKind } from '../player/PlayerStats';
 import type { TileType } from '../world/HexTile';
 import type { Card } from './Deck';
+import type { RelicId } from './Relics';
+import type { Goal } from './Synergy';
 
 // Saves live in localStorage: one autosave plus three manual slots.
 
@@ -17,6 +19,8 @@ export interface TileSave {
   bridge: number | null;
   stairs?: number | null;
   cleared?: boolean;
+  blighted?: boolean;
+  deep?: boolean;
 }
 
 export interface SaveData {
@@ -24,7 +28,17 @@ export interface SaveData {
   savedAt: number;
   tiles: TileSave[]; // in placement order
   player: { x: number; z: number; yaw: number };
-  stats: { level: Record<StatKind, number>; hearts: number; flasks: number; embers: number };
+  stats: {
+    level: Record<StatKind, number>;
+    hearts: number;
+    flasks: number;
+    embers: number;
+    relics?: RelicId[];
+    bonusFlasks?: number;
+  };
+  goals?: Goal[];
+  blight?: { ticks: number; level: number; start: number };
+  kills?: number;
   deck: { count: number; offer: Card[]; boss?: boolean };
   pile: { x: number; z: number; embers: number } | null;
   forests: number;

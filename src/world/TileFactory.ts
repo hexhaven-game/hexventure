@@ -189,11 +189,17 @@ export class TileFactory {
     this.water.uniforms.uTime.value = time;
   }
 
-  create(coord: HexCoord, type: TileType, opts: { chest?: boolean; rotation?: number; stairs?: number | null } = {}): HexTile {
+  create(
+    coord: HexCoord,
+    type: TileType,
+    opts: { chest?: boolean; rotation?: number; stairs?: number | null; blighted?: boolean; deep?: boolean } = {},
+  ): HexTile {
     const tile = new HexTile(coord, type);
+    tile.blighted = !!opts.blighted;
+    tile.deep = !!opts.deep;
     if (type === 'hill' && opts.stairs !== undefined) tile.stairsDir = opts.stairs;
     tile.rotation = (((opts.rotation ?? 0) % 6) + 6) % 6;
-    tile.hasChest = type === 'forest' && !!opts.chest;
+    tile.hasChest = (type === 'forest' || type === 'hill') && !!opts.chest;
     const rng = mulberry32(hashString(`${tile.key}:${type}`));
     if (type === 'water') this.buildWaterBody(tile);
     else this.buildLandBody(tile);
@@ -209,6 +215,11 @@ export class TileFactory {
   dispose(tile: HexTile) {
     for (const g of tile.ownGeometries) g.dispose();
     for (const c of tile.edges.children) (c as THREE.Mesh).geometry.dispose();
+  }
+
+  // recolour one tile (after the Blight takes it or leaves it)
+  refresh(tile: HexTile) {
+    this.recolor(tile);
   }
 
   // Recolour and rebuild the edge-dependent parts of a tile and its neighbours after a change.
@@ -319,6 +330,7 @@ export class TileFactory {
     const sand = new THREE.Color(COLORS.sand);
     const lairTint = new THREE.Color(0x5f7d48);
     const bossTint = new THREE.Color(0x6d5f7a);
+    const blight = new THREE.Color(0x7a5a8a);
     const c = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
       const lx = pos.getX(i);
@@ -338,6 +350,8 @@ export class TileFactory {
       const fromCenter = Math.hypot(lx, lz) / HEX_RADIUS;
       if (tile.type === 'lair') c.lerp(lairTint, 0.45 * (1 - fromCenter * 0.6));
       if (tile.type === 'boss') c.lerp(bossTint, 0.6 * (1 - fromCenter * 0.5));
+      if (tile.deep) c.lerp(forest, 0.25);
+      if (tile.blighted) c.lerp(blight, 0.5 + 0.2 * fbm(wx * 0.2, wz * 0.2));
       if (tile.elevation === 0) {
         nb.forEach((n, d) => {
           if (n?.type === 'water') c.lerp(sand, 1 - smoothstep(0.8, 2.6, distanceToEdge(lx, lz, d)));
@@ -523,6 +537,12 @@ export class TileFactory {
         break;
       }
       case 'hill': {
+        if (chest) {
+          // Highlands: a chest on top, reached by stairs
+          s.reserve(1.5, -1, 1.8);
+          const [rx, rz] = rot(1.5, -1);
+          tile.chestSpawn = new THREE.Vector3(rx, y, rz);
+        }
         // rocks along the rim make the cliff read as rocky from above
         scatter(10, 1.0, () => rock(rng, 0.6 + rng() * 0.6), { minCenter: INNER_RADIUS * 0.72, margin: 0.2 });
         scatter(3, 1.8, () => tree(rng, 0.9 + rng() * 0.3), { maxCenter: 6 });

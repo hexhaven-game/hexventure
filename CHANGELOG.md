@@ -2,6 +2,20 @@
 
 All notable changes to Hexventure. The game reads this file too: the version on the title screen opens it.
 
+## 0.4 — 25-09-2026
+
+### New
+- Tile synergies: every third forest in one forest is a Deep Forest (a chest and an elite), every second hill of a range gets a chest on top (reach it with stairs), and every meadow by the water makes the shrine 5% cheaper (up to 30%). Hovering a spot tells you what it would bring.
+- Goals: a new patch of meadow, forest or water can come with a goal ("grow it to 4"); reaching it gives two tiles.
+- The Blight: every few tiles you place (and every rest) it takes a tile at the edge of your land. Everything there becomes an elite; cleansing it gives two tiles, memories and a relic. Enemies get a little tougher as it spreads.
+- Relics: choose 1 of 3 from far chests, Deep Forests, hill chests, lairs and cleansed Blight. Twelve in all, from Flame Trail and Second Wind to Hungry Fang and Cartographer.
+- Elites: Swift, Armoured and Splitting versions of every enemy, with a coloured ring, a health bar and double embers.
+- Hill and water enemies: the Rockling (throws stones, slams the ground) lives on hills, the Marsh Wisp (fires slow orbs) floats over water.
+- The Hearthstone: memories you earn carry over between runs. Spend them on Bigger Stack, Warm Hearth, Ember Purse and Keepsake. Winning unlocks a higher Blight level for harder runs with more memories.
+
+### Improved
+- The tile choice shows just the tiles; the line above it only appears for a hint or a warning.
+
 ## 0.3 — 25-09-2026
 
 ### Improved

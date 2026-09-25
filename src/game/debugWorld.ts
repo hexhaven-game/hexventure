@@ -30,7 +30,7 @@ export const DEBUG_WORLD: TileSave[] = [
   t(-2, 2, 'water'),
   t(-2, 1, 'hill', 1),
   t(1, 2, 'meadow', 3),
-  t(2, 1, 'forest', 4),
+  t(2, 1, 'forest', 4, { blighted: true }),
   t(-1, 3, 'meadow', 1),
   t(1, -2, 'shrine'),
   t(3, -1, 'meadow', 2),
