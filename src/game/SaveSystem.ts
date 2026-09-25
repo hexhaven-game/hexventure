@@ -1,4 +1,6 @@
+import type { StatKind } from '../player/PlayerStats';
 import type { TileType } from '../world/HexTile';
+import type { Card } from './Deck';
 
 // Saves live in localStorage: one autosave plus three manual slots.
 
@@ -12,18 +14,22 @@ export interface TileSave {
   rot: number;
   chest: boolean;
   opened: boolean;
-  enemy: boolean; // the slime of a forest is still alive
   bridge: number | null;
+  stairs?: number | null;
+  cleared?: boolean;
 }
 
 export interface SaveData {
-  v: 1;
+  v: 2;
   savedAt: number;
   tiles: TileSave[]; // in placement order
   player: { x: number; z: number; yaw: number };
-  hearts: number;
+  stats: { level: Record<StatKind, number>; hearts: number; flasks: number; embers: number };
+  deck: { stack: Card[]; hand: Card[] };
+  pile: { x: number; z: number; embers: number } | null;
   forests: number;
   fragments: number;
+  won?: boolean;
 }
 
 const key = (slot: Slot) => `hexadventure-save-${slot}`;
@@ -32,7 +38,7 @@ export const SaveSystem = {
   read(slot: Slot): SaveData | null {
     try {
       const d = JSON.parse(localStorage.getItem(key(slot)) ?? 'null');
-      return d && d.v === 1 && Array.isArray(d.tiles) ? (d as SaveData) : null;
+      return d && d.v === 2 && Array.isArray(d.tiles) ? (d as SaveData) : null;
     } catch {
       return null;
     }

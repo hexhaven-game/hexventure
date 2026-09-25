@@ -1,4 +1,40 @@
+import changelogMd from '../../CHANGELOG.md?raw';
+import { RUN } from '../game/config';
 import { SaveSystem, SLOTS, type Slot } from '../game/SaveSystem';
+import type { PlayerStats, StatKind } from '../player/PlayerStats';
+
+// ---------- changelog (the same CHANGELOG.md as in the repo root) ----------
+interface Release {
+  version: string;
+  date: string;
+  sections: { title: string; items: string[] }[];
+}
+function parseChangelog(md: string): Release[] {
+  const out: Release[] = [];
+  let rel: Release | null = null;
+  let sec: Release['sections'][number] | null = null;
+  for (const raw of md.split('\n')) {
+    const line = raw.trim();
+    const v = line.match(/^##\s+([\d.]+)\s*[—-]\s*(.+)$/);
+    if (v) {
+      rel = { version: v[1], date: v[2].trim(), sections: [] };
+      out.push(rel);
+      sec = null;
+      continue;
+    }
+    const h = line.match(/^###\s+(.+)$/);
+    if (h && rel) {
+      sec = { title: h[1].trim(), items: [] };
+      rel.sections.push(sec);
+      continue;
+    }
+    const item = line.match(/^[-*]\s+(.+)$/);
+    if (item && sec) sec.items.push(item[1]);
+  }
+  return out;
+}
+export const RELEASES = parseChangelog(changelogMd);
+export const APP_VERSION = RELEASES[0]?.version ?? '0';
 
 export interface MenuActions {
   canResume: () => boolean;
@@ -16,11 +52,13 @@ const CLOSE =
 const CONTROLS = `
   <div class="controls">
     <div><h3>Play</h3>
-      <p><kbd>WASD</kbd> move</p><p><kbd>Space</kbd> sword</p><p><kbd>E</kbd> open a chest</p><p><kbd>Tab</kbd> build mode</p><p><kbd>Esc</kbd> pause</p></div>
+      <p><kbd>WASD</kbd> move</p><p><kbd>Space</kbd> sword</p><p><kbd>Shift</kbd> / right-click roll</p><p><kbd>Q</kbd> drink from the flask</p><p><kbd>E</kbd> rest, use a shrine, open a chest</p><p><kbd>Tab</kbd> build mode</p><p><kbd>Esc</kbd> pause</p></div>
     <div><h3>Build</h3>
-      <p><kbd>1</kbd>–<kbd>5</kbd> pick a tile</p><p><kbd>Click</kbd> place</p><p><kbd>R</kbd> / right-click rotate</p><p><kbd>WASD</kbd> pan · <kbd>Wheel</kbd> zoom</p><p><kbd>Tab</kbd> back to play</p></div>
+      <p><kbd>1</kbd>–<kbd>3</kbd> pick a tile from your hand</p><p><kbd>Click</kbd> place</p><p><kbd>R</kbd> / right-click rotate</p><p><kbd>WASD</kbd> pan · <kbd>Wheel</kbd> zoom</p><p><kbd>Tab</kbd> back to play</p></div>
   </div>
-  <p class="note">Build a tile next to your land, walk into it, fight the slime, find the chest. <kbd>F3</kbd> shows debug info.</p>`;
+  <p class="note">Place tiles from your hand, explore them, beat what lives there. Clearing a tile earns a new one.
+  Lairs hold World Fragments; with three, the Boss tile appears. Rest at the campfire, upgrade at a shrine.
+  When you die your embers stay behind: go and get them back. <kbd>F3</kbd> shows debug info.</p>`;
 
 // Title screen, pause menu and the small dialogs (save, load, controls).
 export class Menu {
@@ -46,6 +84,7 @@ export class Menu {
       if (act === 'load') this.showSlots('load');
       if (act === 'controls') this.showControls();
     });
+    document.getElementById('version')!.addEventListener('click', () => this.showChangelog());
     this.modal.addEventListener('click', (e) => {
       if (e.target === this.modal) this.closeModal();
     });
@@ -67,6 +106,7 @@ export class Menu {
       item('debug', 'Debug world', 'Everything already built'),
       item('controls', 'Controls'),
     ].join('');
+    document.getElementById('version')!.textContent = `Version ${APP_VERSION}`;
     document.body.dataset.mode = 'title';
     this.title.classList.remove('hidden');
   }
@@ -116,6 +156,64 @@ export class Menu {
       },
     );
     this.onModalClose = onResume;
+  }
+
+  showChangelog(onClose?: () => void) {
+    const rel = RELEASES.map(
+      (r, i) => `<details class="rel" ${i === 0 ? 'open' : ''}><summary><b>Version ${r.version}</b><span>${r.date}</span><i class="chev"></i></summary>
+        ${r.sections.map((s) => `<h4>${s.title}</h4><ul>${s.items.map((it) => `<li>${it}</li>`).join('')}</ul>`).join('')}</details>`,
+    );
+    this.open(`<h2>What's new</h2>${rel.join('')}`);
+    this.card.classList.add('wide');
+    this.onModalClose = () => {
+      this.card.classList.remove('wide');
+      onClose?.();
+    };
+  }
+
+  // The shrine: spend embers on one level of hearts, stamina or damage.
+  showShrine(stats: PlayerStats, level: (k: StatKind) => void, onClose: () => void) {
+    const draw = () => {
+      const cost = stats.levelCost;
+      const row = (k: StatKind, name: string, now: string, next: string) =>
+        `<button class="up" data-k="${k}" ${stats.canLevel(k) ? '' : 'disabled'}><b>${name}</b><small>${now} → ${next}</small></button>`;
+      this.card.querySelector('.mbody')!.innerHTML = `
+        <h2>Shrine</h2>
+        <p class="note">Spend embers to grow stronger. Each level costs more. You have <b>${stats.embers}</b> embers; the next level costs <b>${cost}</b>.</p>
+        <div class="ups">
+          ${stats.maxHearts >= RUN.maxHearts ? `<button class="up" disabled><b>Hearts</b><small>${stats.maxHearts} (max)</small></button>` : row('hearts', 'Hearts', `${stats.maxHearts}`, `${stats.maxHearts + 1}`)}
+          ${row('stamina', 'Stamina', `${stats.maxStamina}`, `${stats.maxStamina + 20}`)}
+          ${row('damage', 'Sword', `${stats.damage}`, `${stats.damage + 0.5}`)}
+        </div>`;
+    };
+    this.open('');
+    draw();
+    this.card.querySelector('.mbody')!.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('button.up') as HTMLButtonElement | null;
+      if (!b || b.disabled) return;
+      level(b.dataset.k as StatKind);
+      draw();
+    });
+    this.onModalClose = onClose;
+  }
+
+  showWin(summary: string, onNew: () => void, onStay: () => void) {
+    this.open(
+      `<h2>The world is whole again</h2>
+       <p class="note">${summary}</p>
+       <nav class="list"><button data-w="new">Start a new run</button><button data-w="stay">Keep exploring</button></nav>`,
+      (card) => {
+        card.querySelector('nav')!.addEventListener('click', (e) => {
+          const w = (e.target as HTMLElement).closest('button')?.dataset.w;
+          if (!w) return;
+          this.onModalClose = null;
+          this.closeModal();
+          if (w === 'new') onNew();
+          else onStay();
+        });
+      },
+    );
+    this.onModalClose = onStay;
   }
 
   showControls(onClose?: () => void) {

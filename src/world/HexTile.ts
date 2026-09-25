@@ -1,8 +1,13 @@
 import * as THREE from 'three';
 import { ELEVATION_HEIGHT } from '../game/config';
 import { hexKey, hexToWorld, type HexCoord } from './HexGrid';
+import type { SpawnPoint } from '../combat/spawns';
 
-export type TileType = 'home' | 'meadow' | 'forest' | 'water' | 'hill';
+export type TileType = 'home' | 'meadow' | 'forest' | 'water' | 'hill' | 'shrine' | 'lair' | 'boss';
+
+// the special tiles: an upgrade shrine, a miniboss lair and the boss arena
+export const SPECIAL: TileType[] = ['shrine', 'lair', 'boss'];
+
 
 export type Collider =
   | { kind: 'circle'; x: number; z: number; r: number }
@@ -43,6 +48,10 @@ export class HexTile {
   ready = false; // walkable once the placement animation has finished
   rotation = 0; // in 60° steps; turns the decoration layout
   hasChest = false;
+  stairsDir: number | null = null; // hills: stairs up from this side
+  spawns: SpawnPoint[] = []; // enemies that live here (they come back when you rest)
+  cleared = false; // all of them beaten once: the reward is paid
+  interact: THREE.Vector3 | null = null; // campfire or shrine (world)
   chestOpened = false;
   enemyAlive = false; // the forest slime is still around
   ownGeometries: THREE.BufferGeometry[] = []; // unique to this tile, freed when a preview is thrown away

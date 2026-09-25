@@ -14,6 +14,7 @@ export class Player {
   private legR = new THREE.Group();
   private swordPivot = new THREE.Group();
   private swoosh: THREE.Mesh;
+  private flask: THREE.Mesh;
   private mats: THREE.MeshStandardMaterial[] = [];
   private phase = 0;
   private time = 0;
@@ -90,6 +91,12 @@ export class Player {
     );
     this.swoosh.position.y = 1.0;
 
+    // the flask, shown while drinking
+    this.flask = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 0.28, 8), new THREE.MeshStandardMaterial({ color: 0xffa24a, emissive: 0xff7a1a, emissiveIntensity: 0.6, roughness: 0.3 }));
+    this.flask.position.set(0, -0.62, 0.05);
+    this.flask.visible = false;
+    this.armR.add(this.flask);
+
     this.root.add(this.body, this.swordPivot, this.swoosh);
     this.root.traverse((o) => {
       if ((o as THREE.Mesh).isMesh && o !== this.swoosh) o.castShadow = true;
@@ -120,7 +127,8 @@ export class Player {
     this.hurtT = 1;
   }
 
-  animate(dt: number, moving: number, invulnerable: boolean) {
+  // roll: 0..1 through a dodge roll, or -1; drinking: the flask is up
+  animate(dt: number, moving: number, invulnerable: boolean, roll = -1, drinking = false) {
     this.time += dt;
     this.phase += dt * 11 * moving;
     const s = Math.sin(this.phase);
@@ -130,6 +138,20 @@ export class Player {
     this.armR.rotation.x = s * 0.6 * moving;
     this.body.position.y = Math.abs(Math.cos(this.phase)) * 0.07 * moving;
     this.body.scale.y = 1 + Math.sin(this.time * 2.2) * 0.012 * (1 - moving);
+    // roll: tuck in and tumble forward around the waist
+    if (roll >= 0) {
+      this.body.rotation.x = roll * Math.PI * 2;
+      this.body.position.y = 0.55 * Math.sin(roll * Math.PI) * 0.6 + 0.25;
+      this.body.scale.setScalar(0.85);
+    } else {
+      this.body.rotation.x = 0;
+      this.body.scale.x = this.body.scale.z = 1;
+    }
+    this.flask.visible = drinking;
+    if (drinking) {
+      this.armR.rotation.x = -2.1;
+      this.armR.rotation.z = 0.5;
+    }
 
     if (this.swingT >= 0) {
       this.swingT += dt;

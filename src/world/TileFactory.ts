@@ -6,6 +6,7 @@ import {
   DIRECTIONS,
   HexGrid,
   INNER_RADIUS,
+  directionAngle,
   distanceToEdge,
   edgeCorners,
   hexCorners,
@@ -15,7 +16,11 @@ import {
   type HexCoord,
 } from './HexGrid';
 import { HexTile, type Collider, type TileType } from './HexTile';
-import { COLORS, bush, flowers, grass, house, lilyPad, rock, tree, type Prop } from './props';
+import {
+  COLORS, blightCrystal, bush, campfire, deadTree, flowers, grass, house, lilyPad, rock, shrine, stairSteps, standingStone, tree,
+  type Prop,
+} from './props';
+import { STAIRS, stairsHeight } from './stairs';
 
 type V3 = [number, number, number];
 
@@ -61,17 +66,32 @@ interface Band {
   bottom: number;
 }
 
-// vertical sides of a tile, in horizontal colour bands
-function sides(dirs: number[], bands: Band[]): THREE.BufferGeometry {
+// Vertical sides of a tile, in horizontal colour bands. With `gapDir`, that side is split around
+// the stairs: there the wall only starts at ground level.
+function sides(dirs: number[], bands: Band[], gapDir: number | null = null): THREE.BufferGeometry {
   const pos: number[] = [];
   const col: number[] = [];
   const ct = new THREE.Color();
   const cb = new THREE.Color();
+  const segments: [THREE.Vector3, THREE.Vector3, number, Band[]][] = [];
   for (const d of dirs) {
     const [c0, c1] = edgeCorners(d);
-    const a = Math.atan2(c0.z + c1.z, c0.x + c1.x);
+    if (d !== gapDir) {
+      segments.push([c0, c1, d, bands]);
+      continue;
+    }
+    const a = directionAngle(d);
+    const across = (p: THREE.Vector3) => -p.x * Math.sin(a) + p.z * Math.cos(a);
+    const at = (v: number) => c0.clone().lerp(c1, (v - across(c0)) / (across(c1) - across(c0)));
+    const w = STAIRS.width / 2;
+    const [pa, pb] = across(c0) < across(c1) ? [at(-w), at(w)] : [at(w), at(-w)];
+    const low = bands.filter((b) => b.to < 0).map((b) => ({ ...b, from: Math.min(b.from, 0) }));
+    segments.push([c0, pa, d, bands], [pa, pb, d, low], [pb, c1, d, bands]);
+  }
+  for (const [c0, c1, d, segBands] of segments) {
+    const a = directionAngle(d);
     const n: V3 = [Math.cos(a), 0, Math.sin(a)];
-    for (const band of bands) {
+    for (const band of segBands) {
       ct.setHex(band.top);
       cb.setHex(band.bottom);
       const a0: V3 = [c0.x, band.from, c0.z];
@@ -169,14 +189,16 @@ export class TileFactory {
     this.water.uniforms.uTime.value = time;
   }
 
-  create(coord: HexCoord, type: TileType, opts: { chest?: boolean; rotation?: number } = {}): HexTile {
+  create(coord: HexCoord, type: TileType, opts: { chest?: boolean; rotation?: number; stairs?: number | null } = {}): HexTile {
     const tile = new HexTile(coord, type);
+    if (type === 'hill' && opts.stairs !== undefined) tile.stairsDir = opts.stairs;
     tile.rotation = (((opts.rotation ?? 0) % 6) + 6) % 6;
     tile.hasChest = type === 'forest' && !!opts.chest;
     const rng = mulberry32(hashString(`${tile.key}:${type}`));
     if (type === 'water') this.buildWaterBody(tile);
     else this.buildLandBody(tile);
     this.populate(tile, rng, opts.chest ?? false);
+    if (tile.stairsDir !== null) this.addStairs(tile);
     // look right against the current neighbours already (also while it is only a preview)
     this.recolor(tile);
     this.rebuildEdges(tile);
@@ -204,6 +226,15 @@ export class TileFactory {
     const y = tile.groundHeight;
     const top = new THREE.Mesh(hexTop(y, 12), this.terrain);
     tile.ownGeometries.push(top.geometry);
+    if (tile.stairsDir !== null) {
+      // cut the stairs' slope into the hill top
+      const pos = top.geometry.getAttribute('position');
+      for (let i = 0; i < pos.count; i++) {
+        const h = stairsHeight(pos.getX(i), pos.getZ(i), tile.stairsDir, 0.1);
+        if (h !== null) pos.setY(i, Math.min(y, h));
+      }
+      top.geometry.computeVertexNormals();
+    }
     top.receiveShadow = true;
     tile.top = top;
     const bands: Band[] =
@@ -218,7 +249,7 @@ export class TileFactory {
             { from: y, to: y - 0.3, top: COLORS.lip, bottom: COLORS.lip },
             { from: y - 0.3, to: TILE_BASE, top: COLORS.dirt, bottom: COLORS.dirtDark },
           ];
-    const side = new THREE.Mesh(sides([0, 1, 2, 3, 4, 5], bands), this.terrain);
+    const side = new THREE.Mesh(sides([0, 1, 2, 3, 4, 5], bands, tile.stairsDir), this.terrain);
     side.receiveShadow = true;
     side.castShadow = tile.type === 'hill';
     tile.ownGeometries.push(side.geometry);
@@ -286,6 +317,8 @@ export class TileFactory {
     const forest = new THREE.Color(COLORS.forestFloor);
     const hill = new THREE.Color(COLORS.hillTop);
     const sand = new THREE.Color(COLORS.sand);
+    const lairTint = new THREE.Color(0x5f7d48);
+    const bossTint = new THREE.Color(0x6d5f7a);
     const c = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
       const lx = pos.getX(i);
@@ -302,6 +335,9 @@ export class TileFactory {
         c.lerp(forest, f * (0.45 + 0.35 * fbm(wx * 0.15, wz * 0.15)));
       }
       if (tile.type === 'hill') c.lerp(hill, 0.35);
+      const fromCenter = Math.hypot(lx, lz) / HEX_RADIUS;
+      if (tile.type === 'lair') c.lerp(lairTint, 0.45 * (1 - fromCenter * 0.6));
+      if (tile.type === 'boss') c.lerp(bossTint, 0.6 * (1 - fromCenter * 0.5));
       if (tile.elevation === 0) {
         nb.forEach((n, d) => {
           if (n?.type === 'water') c.lerp(sand, 1 - smoothstep(0.8, 2.6, distanceToEdge(lx, lz, d)));
@@ -333,6 +369,18 @@ export class TileFactory {
       );
       tile.edges.add(wall);
     }
+  }
+
+  // stone steps on the stairs' slope, merged with the other props once the tile has landed
+  private addStairs(tile: HexTile) {
+    const d = tile.stairsDir!;
+    const a = directionAngle(d);
+    const steps = stairSteps(STAIRS.length, STAIRS.width, tile.groundHeight);
+    // the steps' local +x runs from the edge inwards
+    steps.rotation.y = -(a + Math.PI);
+    steps.position.set(Math.cos(a) * INNER_RADIUS, 0, Math.sin(a) * INNER_RADIUS);
+    tile.group.add(steps);
+    tile.decor.push({ object: steps, scale: steps.scale.clone(), delay: 0.2 });
   }
 
   // ---------- decoration ----------
@@ -381,9 +429,63 @@ export class TileFactory {
       if (gr.length) add({ object: grass(rng, gr) }, 0, 0, 0.55);
     };
 
+    // stairs: keep their path free of props (the layout is made unrotated, so turn it back)
+    if (tile.stairsDir !== null) {
+      const a = directionAngle(tile.stairsDir);
+      for (let u = 0.3; u < STAIRS.length + 1; u += 1.1) {
+        const px = Math.cos(a) * (INNER_RADIUS - u);
+        const pz = Math.sin(a) * (INNER_RADIUS - u);
+        s.reserve(px * cos + pz * sin, -px * sin + pz * cos, STAIRS.width / 2 + 0.7);
+      }
+    }
+    const interactAt = (x: number, z: number) => {
+      tile.interact = worldSpot(x, z);
+    };
+
     switch (tile.type) {
+      case 'shrine': {
+        add(shrine(), 0, 0, 0.35);
+        s.reserve(0, 0, 3.4);
+        interactAt(0, 2.2);
+        scatter(3, 1.8, () => tree(rng, 0.9 + rng() * 0.3), { minCenter: 5.5 });
+        scatter(4, 0.9, () => bush(rng, 0.7 + rng() * 0.4), { minCenter: 4.5 });
+        smallThings(16, 10);
+        break;
+      }
+      case 'lair': {
+        // a ring of standing stones around an open arena
+        for (let i = 0; i < 9; i++) {
+          if (i === 4) continue; // a gap to walk in
+          const a = (i / 9) * Math.PI * 2 + Math.PI / 2;
+          add(standingStone(rng), Math.cos(a) * 6.8, Math.sin(a) * 6.8, 0.3 + i * 0.03);
+        }
+        s.reserve(0, 0, 7.6);
+        tile.enemySpawn = worldSpot(0, 0);
+        scatter(4, 1.4, () => tree(rng, 0.9 + rng() * 0.3), { margin: 0.1 });
+        smallThings(2, 8);
+        break;
+      }
+      case 'boss': {
+        add(deadTree(rng), 0, -6.2, 0.3);
+        s.reserve(0, -6.2, 1.6);
+        for (let i = 0; i < 7; i++) {
+          const a = (i / 7) * Math.PI * 2;
+          add(standingStone(rng, true), Math.cos(a) * 7.4, Math.sin(a) * 7.4, 0.35 + i * 0.03);
+        }
+        s.reserve(0, 0, 7.8);
+        tile.enemySpawn = worldSpot(0, 0.5);
+        for (let i = 0; i < 8; i++) {
+          const a = rng() * Math.PI * 2;
+          const r = 8 + rng() * 0.6;
+          if (insideHex(Math.cos(a) * r, Math.sin(a) * r, INNER_RADIUS - 0.4)) add(blightCrystal(rng), Math.cos(a) * r, Math.sin(a) * r, 0.6);
+        }
+        break;
+      }
       case 'home': {
         add(house(), -2.2, -2.6, 0.3);
+        add(campfire(), 1.2, 0.6, 0.45);
+        s.reserve(1.2, 0.6, 1.8);
+        interactAt(1.2, 1.9);
         s.reserve(-2.2, -2.6, 3.6);
         s.reserve(0.6, 0.2, 1.6); // path to the door
         tile.playerSpawn = worldSpot(1.8, 2.8);

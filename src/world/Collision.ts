@@ -4,6 +4,7 @@ import { TAU } from '../utils/math';
 import { BRIDGE_HALF_WIDTH } from './Bridge';
 import { HexGrid, INNER_RADIUS, directionAngle, getNeighbors, worldToHex } from './HexGrid';
 import type { Collider, HexTile } from './HexTile';
+import { stairsHeight } from './stairs';
 
 // Simple and predictable: the ground height comes from the hex under a point (water has none,
 // except on a bridge), steps higher than STEP_HEIGHT are walls (cliffs), and props are circles
@@ -19,6 +20,10 @@ export class WorldCollision {
     const tile = this.grid.get(worldToHex(x, z));
     if (!tile || !tile.ready) return null;
     if (tile.type === 'water') return this.onBridge(tile, x, z) ? BRIDGE_Y : null;
+    if (tile.stairsDir !== null) {
+      const s = stairsHeight(x - tile.center.x, z - tile.center.z, tile.stairsDir);
+      if (s !== null) return s;
+    }
     return tile.groundHeight;
   }
 

@@ -195,3 +195,110 @@ export function house(): Prop {
     fade: { height: 5, radius: 3 },
   };
 }
+
+// ---------- special props ----------
+// Props that animate are marked `keep` (never merged into the tile) and tagged for the game loop.
+
+export function campfire(): Prop {
+  const g = new THREE.Group();
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * TAU;
+    const s = new THREE.Mesh(ROCK_GEO, mat(COLORS.rockDark, 0.9));
+    s.scale.set(0.28, 0.2, 0.28);
+    s.position.set(Math.cos(a) * 0.75, 0.1, Math.sin(a) * 0.75);
+    g.add(s);
+  }
+  for (const r of [0.5, -0.6]) {
+    const log = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.1, 6).rotateZ(Math.PI / 2), mat(COLORS.woodDark));
+    log.rotation.y = r;
+    log.position.y = 0.14;
+    g.add(log);
+  }
+  const flame = new THREE.Mesh(
+    new THREE.ConeGeometry(0.38, 1.0, 7).translate(0, 0.5, 0),
+    new THREE.MeshStandardMaterial({ color: 0xffb040, emissive: 0xff7a1a, emissiveIntensity: 1.6, roughness: 0.4 }),
+  );
+  flame.position.y = 0.15;
+  flame.userData.anim = 'flame';
+  g.add(flame);
+  g.userData.keep = true;
+  return { object: shadowed(g), collider: { kind: 'circle', x: 0, z: 0, r: 0.9 } };
+}
+
+export function shrine(): Prop {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.3, 0.4, 6), mat(0xc9c2b2, 0.9));
+  base.position.y = 0.2;
+  const plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.8, 1.0, 6), mat(0xb2aa98, 0.9));
+  plinth.position.y = 0.9;
+  g.add(base, plinth);
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * TAU + Math.PI / 4;
+    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 2.2, 6), mat(0xd8d1c0, 0.9));
+    p.position.set(Math.cos(a) * 1.7, 1.3, Math.sin(a) * 1.7);
+    g.add(p);
+  }
+  const crystal = new THREE.Mesh(
+    new THREE.OctahedronGeometry(0.45, 0),
+    new THREE.MeshStandardMaterial({ color: 0x8ef0ff, emissive: 0x3ac8ff, emissiveIntensity: 1.2, roughness: 0.2 }),
+  );
+  crystal.scale.set(1, 1.5, 1);
+  crystal.position.y = 2.2;
+  crystal.userData.anim = 'crystal';
+  g.add(crystal);
+  g.userData.keep = true;
+  return { object: shadowed(g), collider: { kind: 'circle', x: 0, z: 0, r: 1.2 } };
+}
+
+export function standingStone(rng: () => number, dark = false): Prop {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(0.9, 2.6, 0.6), mat(dark ? 0x5a5566 : 0x9a968c, 0.95));
+  m.position.y = 1.2;
+  m.rotation.set((rng() - 0.5) * 0.15, rng() * TAU, (rng() - 0.5) * 0.15);
+  return { object: shadowed(m), collider: { kind: 'circle', x: 0, z: 0, r: 0.65 } };
+}
+
+export function deadTree(rng: () => number): Prop {
+  const g = new THREE.Group();
+  const bark = mat(0x4a3b3a, 0.9);
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.6, 4.5, 7).translate(0, 2.25, 0), bark);
+  g.add(trunk);
+  for (let i = 0; i < 4; i++) {
+    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.18, 2.2, 5).translate(0, 1.1, 0), bark);
+    b.position.y = 2.5 + i * 0.5;
+    b.rotation.set(0.9 + rng() * 0.4, (i / 4) * TAU + rng(), 0);
+    g.add(b);
+  }
+  g.rotation.y = rng() * TAU;
+  return { object: shadowed(g), collider: { kind: 'circle', x: 0, z: 0, r: 0.7 } };
+}
+
+export function blightCrystal(rng: () => number): Prop {
+  const m = new THREE.Mesh(
+    new THREE.OctahedronGeometry(0.5, 0),
+    new THREE.MeshStandardMaterial({ color: 0x9a5cd6, emissive: 0x5a1f9a, emissiveIntensity: 0.9, roughness: 0.3 }),
+  );
+  m.scale.set(0.7, 1.4 + rng(), 0.7);
+  m.rotation.set((rng() - 0.5) * 0.5, rng() * TAU, (rng() - 0.5) * 0.5);
+  m.position.y = 0.4;
+  return { object: shadowed(m) };
+}
+
+// stone steps up a hill, one box per step (the tile merges them)
+export function stairSteps(length: number, width: number, height: number): THREE.Group {
+  const g = new THREE.Group();
+  const n = 9;
+  const depth = length / n;
+  for (let i = 0; i < n; i++) {
+    const top = (height * (i + 1)) / n;
+    const s = new THREE.Mesh(new THREE.BoxGeometry(depth + 0.02, top + 0.3, width), mat(i % 2 ? 0xb9b2a2 : 0xa9a292, 0.9));
+    s.position.set(depth * (i + 0.5), (top - 0.3) / 2, 0);
+    g.add(s);
+  }
+  for (const side of [-1, 1]) {
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(length, 0.5, 0.3), mat(COLORS.rockDark, 0.9));
+    wall.position.set(length / 2, height / 2, side * (width / 2 + 0.15));
+    wall.rotation.z = Math.atan2(height, length);
+    g.add(wall);
+  }
+  return shadowed(g);
+}
