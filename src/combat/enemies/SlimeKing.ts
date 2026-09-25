@@ -16,8 +16,9 @@ export class SlimeKing extends Enemy {
 
   constructor(pos: THREE.Vector3, tileKey: string, hp = 14) {
     super('slime', pos, tileKey, hp);
+    this.poiseMax = 9;
     this.bossName = 'Slime King';
-    this.poise = true;
+    this.poiseArmor = true;
     this.weight = 6;
     this.shedAt = hp - 4;
     this.blob = new THREE.Mesh(new THREE.SphereGeometry(1.7, 24, 18), this.mat(0x5fd07a, 0.2));

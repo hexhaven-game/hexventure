@@ -10,6 +10,7 @@ export class HollowKing extends Warden {
 
   constructor(pos: THREE.Vector3, tileKey: string, hp = 36) {
     super(pos, tileKey, hp, 'The Hollow King', 2.1);
+    this.poiseMax = 14;
     const gold = new THREE.MeshStandardMaterial({ color: 0xf0c040, emissive: 0x6a4a00, emissiveIntensity: 0.4, roughness: 0.3 });
     const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.3, 0.22, 8, 1, true), gold);
     crown.position.y = 2.28;

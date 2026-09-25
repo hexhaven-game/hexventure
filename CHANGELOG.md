@@ -2,6 +2,20 @@
 
 All notable changes to Hexventure. The game reads this file too: the version on the title screen opens it.
 
+## 0.5 — 25-09-2026
+
+### Improved
+- Combat reworked to feel soulslike. Every attack has a wind-up, a short moment that hits, and a recovery you are committed to; mashing no longer makes you faster, rhythm does.
+- A three-hit combo that clearly sweeps from right to left, back from left to right, then a wide finisher. The sword is always in hand, and a trail shows each swing's arc.
+- A charged heavy attack (hold the right mouse button or R, release to strike).
+- On desktop you aim with the mouse: the hero faces the cursor and strikes that way while you walk with WASD.
+- Lock-on (F) keeps you facing an enemy and frames it with the camera.
+- Impact: a brief hit-stop, camera shake and sparks on every hit; a red flash, a hard shake and a moment of hit-stun when you get hit.
+- Enemies have poise: enough hits (heavy attacks count more) break it, they sink down, and the next hit is a critical for double damage.
+- A white glint warns you just before every enemy attack.
+- Rolling can cancel the recovery of an attack; rolling without a direction is a backstep.
+- The elite health bar shows the enemy you are fighting.
+
 ## 0.4 — 25-09-2026
 
 ### New

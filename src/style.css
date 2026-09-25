@@ -245,3 +245,8 @@ body[data-mode="title"] #goals { display: none; }
 #bossbar.elite i { background: linear-gradient(#ffd070, #e09a30); }
 .tray-head:empty { display: none; }
 .ups small { text-align: right; }
+
+/* hurt: a red flash at the screen edges */
+#hurtfx { position: fixed; inset: 0; pointer-events: none; z-index: 3; opacity: 0; background: radial-gradient(ellipse at center, rgba(255, 40, 40, 0) 55%, rgba(200, 20, 30, 0.55) 100%); }
+#hurtfx.show { animation: hurtfx 0.5s ease-out; }
+@keyframes hurtfx { 0% { opacity: 1; } 100% { opacity: 0; } }

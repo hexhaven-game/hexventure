@@ -22,6 +22,9 @@ export interface EnemyCtx {
   summon: (kind: EnemyKind, at: THREE.Vector3, tileKey: string) => void;
 }
 
+// states in which an enemy is about to attack: they start with a warning glint
+const TELLS = ['windup', 'scrape', 'slam', 'throw', 'crouch', 'squash'];
+
 // Shared behaviour: hit points, flash and knockback when hit, a stagger unless the enemy has
 // poise, dying, and moving with the same collision as the player. Subclasses only decide
 // where to go and when to attack (think).
@@ -40,13 +43,21 @@ export abstract class Enemy {
   abstract readonly radius: number;
   abstract readonly embers: number;
   protected flying = false;
-  protected poise = false; // keeps attacking when hit
+  protected poiseArmor = false; // keeps attacking when hit (until its poise breaks)
   protected weight = 1; // how far hits push it
   protected home: THREE.Vector3;
   protected groundY: number;
   protected move = new THREE.Vector3();
   protected speed = 0;
   protected knock = new THREE.Vector3();
+  // poise: hits wear it down; when it breaks the enemy sinks down for a moment and the next hit
+  // is a critical (double damage). Heavy attacks break it faster.
+  poiseMax = 0;
+  poise = 0;
+  private poiseRest = 0;
+  // a warning glint just before an attack (read by the combat system)
+  told = false;
+  private tellT = 0;
   private flashT = 0;
   private flashMats: THREE.MeshStandardMaterial[] = [];
   private deathT = 0;
@@ -111,6 +122,19 @@ export abstract class Enemy {
   protected setState(s: string) {
     this.state = s;
     this.stateT = 0;
+    if (TELLS.includes(s)) {
+      this.tellT = 0.3;
+      this.told = true;
+    }
+  }
+
+  // bosses set poiseMax; everyone else breaks according to their weight
+  get poiseLimit() {
+    return this.poiseMax || Math.min(8, Math.max(1.5, this.weight * 1.5));
+  }
+
+  get broken() {
+    return this.state === 'broken';
   }
 
   protected toPlayer(ctx: EnemyCtx) {
@@ -128,19 +152,35 @@ export abstract class Enemy {
     return new THREE.Vector3(Math.sin(this.root.rotation.y), 0, Math.cos(this.root.rotation.y));
   }
 
-  // returns true when this hit killed it
-  hit(from: THREE.Vector3, damage: number): boolean {
-    if (this.dead) return false;
+  hit(from: THREE.Vector3, damage: number, poiseDamage = 1): { killed: boolean; crit: boolean; broke: boolean } {
+    const out = { killed: false, crit: false, broke: false };
+    if (this.dead) return out;
+    if (this.broken) {
+      out.crit = true;
+      damage *= 2;
+    }
     this.hp -= this.elite === 'armored' ? damage * 0.75 : damage;
     this.flashT = 0.14;
-    this.knock.set(this.root.position.x - from.x, 0, this.root.position.z - from.z).normalize().multiplyScalar(10 / this.weight);
+    const push = out.crit ? 16 : 10;
+    this.knock.set(this.root.position.x - from.x, 0, this.root.position.z - from.z).normalize().multiplyScalar(push / this.weight);
     if (this.hp <= 0) {
       this.dead = true;
       this.deathT = 0;
-      return true;
+      out.killed = true;
+      return out;
     }
-    if (!this.poise) this.setState('stagger');
-    return false;
+    if (out.crit) {
+      this.setState('stagger');
+      return out;
+    }
+    this.poise += poiseDamage;
+    this.poiseRest = 2.5;
+    if (this.poise >= this.poiseLimit) {
+      this.poise = 0;
+      this.setState('broken');
+      out.broke = true;
+    } else if (!this.poiseArmor) this.setState('stagger');
+    return out;
   }
 
   update(dt: number, ctx: EnemyCtx) {
@@ -159,8 +199,23 @@ export abstract class Enemy {
     }
     this.move.set(0, 0, 0);
     this.speed = 0;
+    this.poiseRest -= dt;
+    if (this.poiseRest <= 0) this.poise = Math.max(0, this.poise - dt * 1.5);
+    this.tellT = Math.max(0, this.tellT - dt);
+    if (this.tellT > 0 && this.flashT <= 0) {
+      // the glint: a warm pulse over the whole body
+      for (const m of this.flashMats) m.emissive.setRGB(0.55 * this.tellT / 0.3 + 0.1, 0.45 * this.tellT / 0.3 + 0.08, 0.2 * this.tellT / 0.3);
+    }
     if (this.state === 'stagger') {
       if (this.stateT > 0.35) this.setState('chase');
+    } else if (this.state === 'broken') {
+      // knocked off balance: sinks down, open to a critical hit
+      const k = Math.min(1, this.stateT / 0.15);
+      this.body.rotation.x = -0.35 * k * (this.stateT > 1.3 ? (1.6 - this.stateT) / 0.3 : 1);
+      if (this.stateT > 1.6) {
+        this.body.rotation.x = 0;
+        this.setState('chase');
+      }
     } else this.think(dt, ctx);
 
     if (this.elite === 'swift') this.speed *= 1.5;

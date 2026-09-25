@@ -12,7 +12,7 @@ export class Rockling extends Enemy {
 
   constructor(pos: THREE.Vector3, tileKey: string, hp = 6) {
     super('rockling', pos, tileKey, hp);
-    this.poise = true;
+    this.poiseArmor = true;
     this.weight = 4;
     const stone = this.mat(0x8f8a80, 0.95);
     const dark = this.mat(0x6d6860, 0.95);

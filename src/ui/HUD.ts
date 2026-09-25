@@ -58,7 +58,7 @@ export class HUD {
     document.body.dataset.mode = mode;
     this.el('hints').innerHTML =
       mode === 'play'
-        ? '<span><kbd>WASD</kbd> Move</span><span><kbd>Space</kbd> Attack</span><span><kbd>Shift</kbd> Roll</span><span><kbd>Q</kbd> Flask</span><span><kbd>E</kbd> Use</span><span><kbd>Tab</kbd> Build</span>'
+        ? '<span><kbd>WASD</kbd> Move · <kbd>Mouse</kbd> Aim</span><span><kbd>Click</kbd> Attack (combo)</span><span><kbd>Hold RMB</kbd> Heavy</span><span><kbd>Shift</kbd> Roll</span><span><kbd>F</kbd> Lock on</span><span><kbd>Q</kbd> Flask · <kbd>E</kbd> Use</span><span><kbd>Tab</kbd> Build</span>'
         : '<span><kbd>1</kbd>–<kbd>3</kbd> Choose</span><span><kbd>Click</kbd> Place</span><span><kbd>R</kbd> Rotate</span><span><kbd>WASD</kbd> Pan</span><span><kbd>Tab</kbd> Play</span>';
   }
 
@@ -174,6 +174,14 @@ export class HUD {
     b.textContent = text;
     b.className = `show ${kind}`;
     window.setTimeout(() => (b.className = ''), 2200);
+  }
+
+  // a red flash at the edges of the screen when you get hit
+  hurtFlash() {
+    const h = this.el('hurtfx');
+    h.classList.remove('show');
+    void h.offsetWidth;
+    h.classList.add('show');
   }
 
   setDebug(text: string | null) {

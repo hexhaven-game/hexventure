@@ -11,6 +11,8 @@ import { InputManager } from '../input/InputManager';
 import { Player } from '../player/Player';
 import { PlayerController } from '../player/PlayerController';
 import { PlayerStats } from '../player/PlayerStats';
+import { PlayerCombat } from '../player/PlayerCombat';
+import { SwordTrail } from '../rendering/SwordTrail';
 import { Environment } from '../rendering/Environment';
 import { Lighting } from '../rendering/Lighting';
 import { Occlusion } from '../rendering/Occlusion';
@@ -38,7 +40,7 @@ import {
 } from '../world/HexGrid';
 import type { HexTile, TileType } from '../world/HexTile';
 import { TileFactory } from '../world/TileFactory';
-import { BRIDGE_Y, BUILD_CAMERA, CHEST_CHANCE, HEX_RADIUS, PLACE_ANIM, PLAY_CAMERA, RUN, STAMINA, WATER_BED, WATER_LEVEL } from './config';
+import { BRIDGE_Y, BUILD_CAMERA, CHEST_CHANCE, HEX_RADIUS, PLACE_ANIM, PLAY_CAMERA, RUN, WATER_BED, WATER_LEVEL } from './config';
 import { DEBUG_WORLD } from './debugWorld';
 import { Deck, type Card } from './Deck';
 import { SaveSystem, type SaveData, type Slot, type TileSave } from './SaveSystem';
@@ -91,6 +93,15 @@ export class Game {
   private occlusion = new Occlusion();
   private player = new Player();
   private stats = new PlayerStats();
+  private attacks = new PlayerCombat(this.stats);
+  private trail: SwordTrail;
+  private hitStop = 0; // seconds of near-frozen time after a hit (impact)
+  private shake = 0; // camera trauma 0..1
+  private lockTarget: Enemy | null = null;
+  private lastHit: { e: Enemy; at: number } | null = null; // for the elite health bar
+  private lockMarker: THREE.Mesh;
+  private aimPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  private aimRay = new THREE.Raycaster();
   private deck = new Deck();
   private thumbs: Thumbs;
   private controller: PlayerController;
@@ -145,6 +156,14 @@ export class Game {
     this.particles = new Particles(this.env.scene);
     this.rings = new Rings(this.env.scene);
     this.controller = new PlayerController(this.player, this.input, this.collision, this.stats);
+    this.trail = new SwordTrail(this.env.scene);
+    this.lockMarker = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.28, 0),
+      new THREE.MeshBasicMaterial({ color: 0xfff1b0, transparent: true, opacity: 0.9, depthTest: false }),
+    );
+    this.lockMarker.renderOrder = 6;
+    this.lockMarker.visible = false;
+    this.env.scene.add(this.lockMarker);
     this.overlay = new GridOverlay(this.env.scene);
     this.preview = new TilePreview(this.env.scene);
     this.debugView = new DebugView(this.env.scene);
@@ -162,11 +181,31 @@ export class Game {
       scene: this.env.scene,
       player: this.player,
       controller: this.controller,
+      attacks: this.attacks,
       stats: this.stats,
       collision: this.collision,
       particles: this.particles,
       rings: this.rings,
-      onHurt: () => {},
+      onHurt: () => {
+        this.attacks.cancel();
+        this.shake = Math.min(1, this.shake + 0.6);
+        this.hitStop = Math.max(this.hitStop, 0.07);
+        this.hud.hurtFlash();
+      },
+      onHit: (e, r) => {
+        this.lastHit = { e, at: this.time };
+        this.hitStop = Math.max(this.hitStop, r.crit ? 0.13 : r.heavy ? 0.09 : 0.055) + (r.killed ? 0.03 : 0);
+        this.shake = Math.min(1, this.shake + (r.crit ? 0.5 : r.heavy ? 0.32 : 0.16) + (r.broke ? 0.2 : 0));
+        if (r.broke) this.hud.message('Broken! Strike now', 1.2);
+      },
+      onTell: (e) => {
+        // the warning glint: a quick white star at the enemy's head
+        const at = e.root.position.clone().setY(e.root.position.y + (e.bossName ? 3.4 : 1.6));
+        for (let k = 0; k < 8; k++) {
+          const a = (k / 8) * Math.PI * 2;
+          this.particles.spawn({ pos: at, vel: new THREE.Vector3(Math.cos(a) * 3, Math.sin(a) * 3, 0), color: 0xffffff, size: 0.09, life: 0.22, gravity: 0 });
+        }
+      },
       onDown: () => this.die(),
       onKill: (e) => this.onKill(e),
     });
@@ -929,6 +968,9 @@ export class Game {
     this.timer.update();
     const dt = Math.min(this.timer.getDelta(), 1 / 20);
     this.time += dt;
+    // impact: right after a hit, gameplay nearly freezes for a few frames (the camera doesn't)
+    const gdt = this.hitStop > 0 ? dt * 0.06 : dt;
+    this.hitStop = Math.max(0, this.hitStop - dt);
     this.fps += (1 / Math.max(dt, 1e-4) - this.fps) * 0.05;
     const input = this.input;
 
@@ -953,12 +995,22 @@ export class Game {
     if (this.mode === 'play') {
       const canAct = active && this.downTimer < 0;
       if (active) {
-        moving = this.controller.update(dt, this.env.camera, canAct);
-        if (canAct && input.wasPressed('Space') && this.controller.free && !this.player.attacking && this.stats.spend(STAMINA.attack)) {
-          this.player.startAttack();
+        // lock-on (F): the nearest enemy; F again lets go
+        if (canAct && input.wasPressed('KeyF')) this.toggleLock();
+        if (this.lockTarget && (!this.lockTarget.alive || this.lockTarget.root.position.distanceTo(this.player.root.position) > 20)) this.lockTarget = null;
+        const aim = this.aimPoint();
+        const light = input.wasPressed('Space') || input.wasPressed('Mouse0');
+        const heavy = input.isDown('Mouse2', 'KeyR');
+        const ready = canAct && !this.controller.rolling && !this.controller.drinking && this.controller.stun <= 0;
+        const started = this.attacks.update(gdt, light, heavy, ready);
+        if (started) {
+          // attacks snap towards the aim, or gently towards the nearest enemy in front
+          const target = aim ?? this.assistTarget();
+          if (target) this.controller.faceTowards(target);
         }
-        this.stats.update(dt);
-        this.combat.update(dt);
+        moving = this.controller.update(gdt, this.env.camera, canAct, this.attacks, aim);
+        this.stats.update(gdt);
+        this.combat.update(gdt);
         this.interactions(canAct);
         if (this.downTimer >= 0) {
           // fall over
@@ -969,7 +1021,10 @@ export class Game {
         this.autosaveTimer -= dt;
         if (this.autosaveTimer <= 0) this.autosave();
       }
-      this.playCam.update(dt, this.player.root.position);
+      const focus = this.lockTarget
+        ? this.player.root.position.clone().lerp(this.lockTarget.root.position, 0.3)
+        : this.player.root.position;
+      this.playCam.update(dt, focus);
       this.playCam.desired(this.wantPos, this.wantLook);
       input.consumeClick();
     } else if (this.mode === 'build') {
@@ -987,7 +1042,22 @@ export class Game {
     }
 
     const roll = this.controller.rolling ? this.controller.rollT / 0.42 : -1;
-    this.player.animate(dt, moving, this.combat.invulnerable > 0, roll, this.controller.drinking);
+    this.player.animate(gdt, {
+      moving,
+      roll,
+      drinking: this.controller.drinking,
+      hurt: this.controller.stun / 0.3,
+      invulnerable: this.combat.invulnerable > 0,
+      arc: this.attacks.def?.arc ?? null,
+      phase: this.attacks.phase,
+      p: this.attacks.phaseProgress,
+      charge: this.attacks.chargeLevel,
+    });
+    // the sword trail shows each swing's arc (during the hit and a moment after)
+    const ph = this.attacks.phase;
+    this.player.blade(this.bladeBase, this.bladeTip);
+    this.trail.update(gdt, ph === 'active' || (ph === 'recover' && this.attacks.phaseProgress < 0.12), this.bladeBase, this.bladeTip, this.attacks.attack?.kind === 'heavy');
+    this.updateLockMarker();
     for (const c of this.chests) c.update(dt);
     for (const o of this.animated) {
       if (o.userData.anim === 'flame') o.scale.set(1 + Math.sin(this.time * 17) * 0.08, 0.85 + Math.random() * 0.3, 1 + Math.cos(this.time * 13) * 0.08);
@@ -999,8 +1069,8 @@ export class Game {
     this.pile?.update(dt);
     this.updatePlacements(dt);
     this.factory.update(this.time);
-    this.particles.update(dt);
-    this.rings.update(dt);
+    this.particles.update(gdt);
+    this.rings.update(gdt);
 
     // camera: glide slowly while switching modes, otherwise follow tightly
     this.transition = Math.max(0, this.transition - dt);
@@ -1010,6 +1080,13 @@ export class Game {
     this.camLook.lerp(this.wantLook, dampFactor(rate, dt));
     this.env.camera.position.copy(this.camPos);
     this.env.camera.lookAt(this.camLook);
+    if (this.shake > 0) {
+      // trauma-style shake: strong hits shake much more than light ones
+      const t = this.shake * this.shake * 0.55;
+      this.env.camera.position.x += (Math.sin(this.time * 67) + Math.sin(this.time * 31)) * 0.5 * t;
+      this.env.camera.position.y += (Math.sin(this.time * 73 + 1) + Math.sin(this.time * 29)) * 0.5 * t;
+      this.shake = Math.max(0, this.shake - dt * 2.4);
+    }
     const fov = this.mode === 'build' ? BUILD_CAMERA.fov : PLAY_CAMERA.fov;
     if (Math.abs(this.env.camera.fov - fov) > 0.01) {
       this.env.camera.fov += (fov - this.env.camera.fov) * dampFactor(4, dt);
@@ -1044,11 +1121,74 @@ export class Game {
     if (++this.frames === 3) document.body.classList.add('ready');
   }
 
+  private bladeBase = new THREE.Vector3();
+  private bladeTip = new THREE.Vector3();
+
+  // where the hero looks: the lock-on target, else the mouse on the ground (desktop aiming)
+  private aimPoint(): THREE.Vector3 | null {
+    if (this.lockTarget) return this.lockTarget.root.position;
+    if (!this.input.hasMouse) return null;
+    this.aimRay.setFromCamera(this.input.mouse, this.env.camera);
+    this.aimPlane.constant = -(this.player.root.position.y + 0.8);
+    const hit = new THREE.Vector3();
+    if (!this.aimRay.ray.intersectPlane(this.aimPlane, hit)) return null;
+    if (Math.hypot(hit.x - this.player.root.position.x, hit.z - this.player.root.position.z) < 0.4) return null;
+    return hit;
+  }
+
+  // without a mouse: the nearest enemy close by and roughly in front
+  private assistTarget(): THREE.Vector3 | null {
+    const p = this.player.root.position;
+    const f = new THREE.Vector3(Math.sin(this.player.facing), 0, Math.cos(this.player.facing));
+    let best: Enemy | null = null;
+    let bd = 3.6;
+    for (const e of this.combat.enemies) {
+      if (!e.alive) continue;
+      const d = new THREE.Vector3(e.root.position.x - p.x, 0, e.root.position.z - p.z);
+      const dist = d.length();
+      if (dist < bd && d.normalize().dot(f) > 0.35) {
+        bd = dist;
+        best = e;
+      }
+    }
+    return best?.root.position ?? null;
+  }
+
+  private toggleLock() {
+    if (this.lockTarget) {
+      this.lockTarget = null;
+      return;
+    }
+    const p = this.player.root.position;
+    let best: Enemy | null = null;
+    let bd = 16;
+    for (const e of this.combat.enemies) {
+      if (!e.alive) continue;
+      const d = e.root.position.distanceTo(p);
+      if (d < bd) {
+        bd = d;
+        best = e;
+      }
+    }
+    this.lockTarget = best;
+  }
+
+  private updateLockMarker() {
+    const t = this.mode === 'play' ? this.lockTarget : null;
+    this.lockMarker.visible = !!t;
+    if (!t) return;
+    this.lockMarker.position.copy(t.root.position).setY(t.root.position.y + (t.bossName ? 4.8 : 2.5) + Math.sin(this.time * 4) * 0.12);
+    this.lockMarker.rotation.y += 0.05;
+  }
+
   private updateBossBar() {
     const p = this.player.root.position;
     const engaged = (e: Enemy, r: number) => e.alive && e.state !== 'idle' && e.root.position.distanceTo(p) < r;
     const boss = this.mode === 'play' ? this.combat.enemies.find((e) => e.bossName && engaged(e, 24)) : undefined;
-    const elite = !boss && this.mode === 'play' ? this.combat.enemies.find((e) => e.elite && e.alive && e.root.position.distanceTo(p) < 11) : undefined;
+    // the elite you are fighting: your lock-on target, else the one you hit last
+    const recent = this.lastHit && this.time - this.lastHit.at < 6 ? this.lastHit.e : null;
+    const pick = [this.lockTarget, recent].find((e) => e && e.alive && e.elite && e.root.position.distanceTo(p) < 14);
+    const elite = !boss && this.mode === 'play' ? pick ?? undefined : undefined;
     const shown = boss ?? elite;
     this.hud.setBoss(shown?.displayName ?? null, shown?.hp, shown?.maxHp, !boss && !!elite);
   }

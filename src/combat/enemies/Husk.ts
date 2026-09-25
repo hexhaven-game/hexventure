@@ -16,7 +16,7 @@ export class Husk extends Enemy {
 
   constructor(pos: THREE.Vector3, tileKey: string, hp = 4) {
     super('husk', pos, tileKey, hp);
-    this.poise = true;
+    this.poiseArmor = true;
     this.weight = 2.2;
     const bone = this.mat(0xe6dcc6, 0.7);
     const iron = this.mat(0x5d6670, 0.45);

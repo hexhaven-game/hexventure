@@ -13,6 +13,7 @@ export class Warden extends Husk {
 
   constructor(pos: THREE.Vector3, tileKey: string, hp = 16, name = 'Grove Warden', size = 1.7) {
     super(pos, tileKey, hp);
+    this.poiseMax = 9;
     this.bossName = name;
     this.body.scale.setScalar(size);
     this.reach = 2.7 * size * 0.9;

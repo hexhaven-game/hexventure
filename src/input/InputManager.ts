@@ -27,7 +27,11 @@ export class InputManager {
     canvas.addEventListener('pointerdown', (e) => {
       if (e.button === 0) this.clicks++;
       if (e.button === 2) this.rightClicks++;
+      // mouse buttons also count as keys: 'Mouse0' (left), 'Mouse2' (right)
+      this.pressed.add(`Mouse${e.button}`);
+      this.down.add(`Mouse${e.button}`);
     });
+    window.addEventListener('pointerup', (e) => this.down.delete(`Mouse${e.button}`));
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener(
       'wheel',

@@ -90,7 +90,7 @@ export class Boar extends Enemy {
         }
         break;
       case 'charge': {
-        this.poise = true;
+        this.poiseArmor = true;
         this.move.copy(this.charge);
         this.speed = 13;
         legSpeed = 22;
@@ -101,10 +101,10 @@ export class Boar extends Enemy {
         const moved = this.root.position.distanceTo(this.last);
         this.last.copy(this.root.position);
         if (this.stateT > 0.1 && moved < 13 * dt * 0.3) {
-          this.poise = false;
+          this.poiseArmor = false;
           this.setState('stunned'); // ran into something
         } else if (this.stateT > 1.1) {
-          this.poise = false;
+          this.poiseArmor = false;
           this.setState('recover');
         }
         break;

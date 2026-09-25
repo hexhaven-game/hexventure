@@ -63,14 +63,23 @@ Splitting (breaks into slimes). Elites have a coloured ring, a health bar and dr
 
 | Play mode | | Build mode | |
 | --- | --- | --- | --- |
-| WASD / arrows | move | 1–3 or click | pick a tile from your hand |
-| Space | sword | mouse | the tile follows the cursor and hovers over a free spot |
-| Shift / right-click | dodge roll | R / right-click | rotate the tile 60° |
-| Q | drink from the flask | click | drop it |
-| E | rest, use a shrine, open a chest | WASD, wheel | pan, zoom |
-| Tab | build mode | Tab | back to play |
-| Esc | pause (save, load, title) | | |
-| F3 | debug view | | |
+| WASD / arrows | move | 1–3 or click | choose one of three tiles |
+| mouse | aim (the hero faces the cursor) | mouse | the tile follows the cursor and hovers over a free spot |
+| click / Space | attack: a three-hit combo, in rhythm | R / right-click | rotate the tile 60° |
+| hold right mouse / R | charged heavy attack | click | drop it |
+| Shift | dodge roll (cancels an attack's recovery) | WASD, wheel | pan, zoom |
+| F | lock on | Tab | back to play |
+| Q | drink from the flask | | |
+| E | rest, use a shrine, open a chest | | |
+| Tab / Esc / F3 | build mode / pause / debug view | | |
+
+### Combat
+
+Every attack has a wind-up, a short active moment (the only time it hits) and a recovery you
+are committed to. Light attacks chain into a combo from the second half of the recovery, and
+only one press is remembered, so rhythm matters, not mashing. Hits cause a brief hit-stop and
+camera shake. Enemies have poise: wear it down and they are broken for a moment, and the next
+hit is a critical. A white glint warns you just before an enemy attacks; roll through it.
 
 ## Title screen, saves and the debug world
 

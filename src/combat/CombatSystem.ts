@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PLAYER } from '../game/config';
 import type { Player } from '../player/Player';
+import type { PlayerCombat } from '../player/PlayerCombat';
 import type { PlayerController } from '../player/PlayerController';
 import type { PlayerStats } from '../player/PlayerStats';
 import type { Particles } from '../rendering/Particles';
@@ -11,8 +12,6 @@ import type { Rings } from '../rendering/Rings';
 import { Projectiles } from './Projectiles';
 import { createEnemy } from './spawns';
 
-const SWORD_REACH = 2.4;
-const SWORD_ARC = THREE.MathUtils.degToRad(80); // half angle in front of the player
 
 const COLORS: Record<string, number[]> = {
   slime: [0x7b6cff, 0x9d8fff],
@@ -28,6 +27,7 @@ interface Deps {
   scene: THREE.Scene;
   player: Player;
   controller: PlayerController;
+  attacks: PlayerCombat;
   stats: PlayerStats;
   collision: WorldCollision;
   particles: Particles;
@@ -35,6 +35,10 @@ interface Deps {
   onHurt: () => void;
   onDown: () => void;
   onKill: (e: Enemy) => void;
+  // a sword hit landed (for hit-stop, shake and sparks)
+  onHit: (e: Enemy, r: { crit: boolean; broke: boolean; killed: boolean; heavy: boolean }) => void;
+  // an enemy is about to attack
+  onTell: (e: Enemy) => void;
 }
 
 // The sword, taking hits, thorns, and all enemies.
@@ -120,15 +124,17 @@ export class CombatSystem {
   private burned = new WeakMap<Enemy, number>();
 
   // any damage to an enemy, from any source; handles deaths (and splitting elites)
-  private damage(e: Enemy, amount: number) {
-    const killed = e.hit(this.d.player.root.position, amount);
-    if (!killed) return;
+  private damage(e: Enemy, amount: number, poise = 1) {
+    const r = e.hit(this.d.player.root.position, amount, poise);
+    if (r.broke) this.d.rings.shock(e.root.position.clone(), 1.6 + e.radius, 0xffd070);
+    if (!r.killed) return r;
     const at = e.root.position.clone().setY(e.root.position.y + 0.8);
     this.d.particles.burst(at, [...COLORS[e.kind], 0xffffff], 26, 6, 0.2, 4);
     if (e.elite === 'splitting') {
       for (const a of [0, Math.PI]) this.ctx.summon('slime', e.root.position.clone().add(new THREE.Vector3(Math.cos(a) * 1.4, 0, Math.sin(a) * 1.4)), e.tileKey);
     }
     this.d.onKill(e);
+    return r;
   }
 
   update(dt: number) {
@@ -149,26 +155,45 @@ export class CombatSystem {
       }
     }
 
-    // sword hits land in the middle of the swing, once per enemy per swing
-    const s = player.swing;
-    if (s > 0.15 && s < 0.8) {
+    // the sword only hits during an attack's active window, each enemy once per attack
+    const a = this.d.attacks.attack;
+    if (a && this.d.attacks.phase === 'active') {
       const fx = Math.sin(player.facing);
       const fz = Math.cos(player.facing);
+      const half = THREE.MathUtils.degToRad(a.def.halfArc);
       for (const e of this.enemies) {
-        if (!e.alive || e.lastHitSwing === player.swingId) continue;
+        if (!e.alive || a.hits.has(e)) continue;
         const dx = e.root.position.x - pos.x;
         const dz = e.root.position.z - pos.z;
         const dist = Math.hypot(dx, dz);
-        if (dist > SWORD_REACH * stats.reachMul + e.radius * 0.5) continue;
-        if (dist > 0.3 && Math.acos(Math.max(-1, Math.min(1, (dx * fx + dz * fz) / dist))) > SWORD_ARC) continue;
-        e.lastHitSwing = player.swingId;
+        if (dist > a.def.reach * stats.reachMul + e.radius * 0.6) continue;
+        if (dist > 0.4 && Math.acos(Math.max(-1, Math.min(1, (dx * fx + dz * fz) / dist))) > half) continue;
+        a.hits.add(e);
+        const r = this.damage(e, stats.damage * a.def.damage * a.power, a.def.poise * a.power);
+        this.d.onHit(e, { ...r, heavy: a.kind === 'heavy' || a.kind === 'light3' });
         const at = e.root.position.clone().setY(e.root.position.y + 0.8);
-        particles.burst(at, [0xffffff, 0xffe27a], 10, 5, 0.1, 2);
-        this.damage(e, stats.damage);
+        // sparks fly away from the blade
+        for (let k = 0; k < (r.crit ? 22 : 12); k++) {
+          const dir = new THREE.Vector3(dx, 0, dz).normalize();
+          particles.spawn({
+            pos: at,
+            vel: new THREE.Vector3(dir.x * 6 + (Math.random() - 0.5) * 5, 2 + Math.random() * 4, dir.z * 6 + (Math.random() - 0.5) * 5),
+            color: r.crit ? 0xffd070 : k % 2 ? 0xffffff : 0xffe27a,
+            size: 0.06 + Math.random() * 0.08,
+            life: 0.25 + Math.random() * 0.25,
+            gravity: 12,
+          });
+        }
       }
     }
 
-    for (const e of this.enemies) e.update(dt, this.ctx);
+    for (const e of this.enemies) {
+      e.update(dt, this.ctx);
+      if (e.told) {
+        e.told = false;
+        this.d.onTell(e);
+      }
+    }
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       if (this.enemies[i].removable) {
         this.d.scene.remove(this.enemies[i].root);
